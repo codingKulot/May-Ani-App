@@ -17,7 +17,7 @@ const PER_EMAIL = 3; // reset requests for one email address ...
 const PER_EMAIL_MS = 60 * 60_000; // ... per hour
 const BODY = 16 * 1024;
 
-export const OFF_MESSAGE = 'Resetting a password by email is not switched on for this server yet. You can keep using May-Ani as a guest, or create a new account with another email.';
+export const OFF_MESSAGE = 'Resetting a password by email is not switched on for this server yet. Create a new account with another email, or ask the server owner for help.';
 export const SENT_MESSAGE = `If an account uses this email, we sent it a link to choose a new password. The link works for ${RESET_MINUTES} minutes. Check your Spam folder too.`;
 const LINK_GONE = 'This reset link has expired or was already used. Ask for a new one.';
 

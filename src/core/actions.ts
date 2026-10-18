@@ -13,20 +13,14 @@ import { LIST_COLLECTIONS, PREF_IDS, cleanBackup, type PrefId } from '@/services
 
 /** All state mutations live here so pages stay declarative and the rules are in one testable place. */
 
-export function createProfile(name: string, location: GeoPlace, role: Profile['role'], guest = false): Profile {
-  const profile: Profile = { id: uid(), name: name.trim() || 'Farmer', location, guest, role, createdAt: new Date().toISOString() };
-  setState((s) => ({ ...s, profile }));
-  return profile;
-}
-
 export function updateProfile(patch: Partial<Profile>) {
-  setState((s) => (s.profile ? { ...s, profile: { ...s.profile, ...patch, guest: false } } : s));
+  setState((s) => (s.profile ? { ...s, profile: { ...s.profile, ...patch } } : s));
 }
 
 /**
  * After sign-up or log-in: the account's name, role and location become the profile.
- * Farms, plans and records already on this device are kept (a guest who signs up keeps everything). The forms first
- * bring in the account's farm data (services/sync prepareLink); once the profile is linked, syncing runs by itself.
+ * Farms, plans and records already on this device are kept (also those of a guest profile from before guest mode was removed).
+ * The forms first bring in the account's farm data (services/sync prepareLink); once the profile is linked, syncing runs by itself.
  */
 export function signInWithAccount(a: { id: string; email: string; name: string; role: Profile['role']; location: GeoPlace | null; createdAt: string }): Profile {
   const current = getState().profile;
@@ -35,7 +29,6 @@ export function signInWithAccount(a: { id: string; email: string; name: string; 
     name: a.name,
     role: a.role,
     location: a.location ?? current?.location ?? DEFAULT_PLACE,
-    guest: false,
     createdAt: current?.createdAt ?? a.createdAt,
     account: { id: a.id, email: a.email },
   };
@@ -48,7 +41,7 @@ export function signOutLocal() {
   setState((s) => ({ ...s, profile: null }));
 }
 
-/** The server no longer accepts this login: keep using the app locally, without the account link. */
+/** The server no longer accepts this login: the log-in screen shows (App.tsx); the farm data stays on the phone. */
 export function unlinkAccount() {
   setState((s) => (s.profile?.account ? { ...s, profile: { ...s.profile, account: undefined } } : s));
 }

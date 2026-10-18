@@ -3,8 +3,8 @@
 //     platform) every request arrives from the proxy, so all users would share one address, one rate limit and one lockout.
 //     With TRUST_PROXY set, the address is read from X-Forwarded-For instead: from the right, because anyone can type
 //     whatever they like into the left part of that header.
-//   * dailyQuota(limits): counts paid AI uses (photo checks, pictures) per account, per guest phone and per guest IP address,
-//     plus a total for the whole server, per Philippine calendar day. Kept in memory: restarting the server starts the counts again.
+//   * dailyQuota(limits): counts paid AI uses (photo checks, pictures) per account, plus a total for the whole server, per
+//     Philippine calendar day. Only logged-in users may use AI. Kept in memory: restarting the server starts the counts again.
 
 const norm = (ip) => {
   const s = String(ip ?? '').trim().slice(0, 64);
@@ -50,10 +50,9 @@ export function clientIp(req, trust = { mode: 'off' }) {
 export const phDay = (now = Date.now()) => new Date(now + 8 * 3_600_000).toISOString().slice(0, 10);
 
 /**
- * Daily allowance for one kind of paid use. `limits`: { guest, guestPerIp, account, total } uses per day (0 = none).
- * take(who) with who = { userId } for a logged-in account, or { device, ip } for a guest (device may be '').
- * Answers { ok: true, release() } (release gives the use back, for failures that cost nothing) or
- * { ok: false, reason: 'total' | 'account' | 'device' | 'ip', limit }.
+ * Daily allowance for one kind of paid use (only logged-in accounts may use AI). `limits`: { account, total } uses per day
+ * (0 = none). take(userId) answers { ok: true, release() } (release gives the use back, for failures that cost nothing) or
+ * { ok: false, reason: 'total' | 'account', limit }.
  */
 export function dailyQuota(limits, now = () => Date.now()) {
   let day = phDay(now());
@@ -64,14 +63,12 @@ export function dailyQuota(limits, now = () => Date.now()) {
     if (d !== day) { day = d; used.clear(); }
   };
   return {
-    take(who) {
+    take(userId) {
       roll();
-      const checks = who.userId
-        ? [[`account:${who.userId}`, limits.account, 'account']]
-        : [[`device:${who.device || `ip:${who.ip}`}`, limits.guest, 'device'], [`ip:${who.ip}`, limits.guestPerIp, 'ip']];
       if (count('total') >= limits.total) return { ok: false, reason: 'total', limit: limits.total };
-      for (const [key, limit, reason] of checks) if (count(key) >= limit) return { ok: false, reason, limit };
-      const keys = ['total', ...checks.map(([key]) => key)];
+      const mine = `account:${userId}`;
+      if (count(mine) >= limits.account) return { ok: false, reason: 'account', limit: limits.account };
+      const keys = ['total', mine];
       for (const k of keys) used.set(k, count(k) + 1);
       const takenOn = day;
       let released = false;

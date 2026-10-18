@@ -9,7 +9,7 @@ import type { AppState } from '@/types';
 describe('hasUserData', () => {
   const empty = (): AppState => ({
     ...initialState(),
-    profile: { id: 'p1', name: 'Juan', location: DEFAULT_PLACE, guest: true, role: 'farmer', createdAt: '2026-10-18T00:00:00.000Z' },
+    profile: { id: 'p1', name: 'Juan', location: DEFAULT_PLACE, role: 'farmer', createdAt: '2026-10-18T00:00:00.000Z', account: { id: 'a1', email: 'juan@example.com' } },
   });
 
   test('a new profile with nothing in it has no data', () => {

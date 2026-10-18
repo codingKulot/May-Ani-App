@@ -73,7 +73,7 @@ export function toFormErrors(e: unknown): FormErrors {
     return { [f]: e.message };
   }
   if (e instanceof Error && e.name === 'AbortError') return { form: 'The server took too long to answer. Check your internet and try again.' };
-  return { form: 'Could not reach the May-Ani server. Check your internet, or continue as a guest for now.' };
+  return { form: 'Could not reach the May-Ani server. Check your internet and try again.' };
 }
 
 export async function signUp(input: SignUpInput): Promise<Account> {

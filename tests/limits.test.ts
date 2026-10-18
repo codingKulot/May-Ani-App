@@ -1,10 +1,9 @@
 import { afterAll, describe, expect, test } from 'bun:test';
-import { MongoMemoryServer } from 'mongodb-memory-server';
 import { clientIp, dailyQuota, envCount, parseTrustProxy, phDay } from '../server/limits.mjs';
-import { OFF, startServer, type Srv } from './support/server';
+import { OFF, signUpUser, startMongo, startServer, type Srv } from './support/server';
 
 /**
- * Going online safely: the daily allowance for paid AI (server/limits.mjs), the caller's real address behind a proxy
+ * Going online safely: the daily allowance for paid AI (server/limits.mjs, logged-in accounts only), the caller's real address behind a proxy
  * (TRUST_PROXY), and the security headers on every answer. AI calls go to FAKE Anthropic and Gemini servers on 127.0.0.1,
  * so no real key or credit is used; the account tests use a throwaway MongoDB.
  */
@@ -45,47 +44,44 @@ describe('the caller\'s address (TRUST_PROXY)', () => {
 });
 
 describe('daily allowance', () => {
-  const limits = { guest: 2, guestPerIp: 3, account: 4, total: 6 };
+  const limits = { account: 2, total: 3 };
 
   test('the day changes at midnight in the Philippines (UTC+8)', () => {
     expect(phDay(Date.parse('2026-10-18T15:59:59Z'))).toBe('2026-10-18');
     expect(phDay(Date.parse('2026-10-18T16:00:00Z'))).toBe('2026-10-19');
   });
 
-  test('per guest phone, per address for all guests on it, per account, and in total', () => {
+  test('per account, and in total for the whole server', () => {
     const q = dailyQuota(limits);
-    expect(q.take({ device: 'phone-a1', ip: '1.1.1.1' }).ok).toBe(true);
-    expect(q.take({ device: 'phone-a1', ip: '1.1.1.1' }).ok).toBe(true);
-    expect(q.take({ device: 'phone-a1', ip: '1.1.1.1' })).toEqual({ ok: false, reason: 'device', limit: 2 });
-    expect(q.take({ device: 'phone-b2', ip: '1.1.1.1' }).ok).toBe(true); // the third guest use on this address
-    expect(q.take({ device: 'phone-c3', ip: '1.1.1.1' })).toEqual({ ok: false, reason: 'ip', limit: 3 });
-    // an account has its own allowance, on any address
-    for (let i = 0; i < 3; i++) expect(q.take({ userId: 'u1', ip: '1.1.1.1' }).ok).toBe(true);
-    expect(q.take({ userId: 'u1', ip: '2.2.2.2' })).toEqual({ ok: false, reason: 'total', limit: 6 });
+    expect(q.take('u1').ok).toBe(true);
+    expect(q.take('u1').ok).toBe(true);
+    expect(q.take('u1')).toEqual({ ok: false, reason: 'account', limit: 2 });
+    expect(q.take('u2').ok).toBe(true);
+    expect(q.take('u3')).toEqual({ ok: false, reason: 'total', limit: 3 });
   });
 
   test('a use that cost nothing is given back, once', () => {
     const q = dailyQuota(limits);
-    const t = q.take({ device: '', ip: '1.1.1.1' });
+    const t = q.take('u1');
     if (!t.ok) throw new Error('should be allowed');
     t.release();
     t.release();
-    expect(q.take({ device: '', ip: '1.1.1.1' }).ok).toBe(true);
-    expect(q.take({ device: '', ip: '1.1.1.1' }).ok).toBe(true);
-    expect(q.take({ device: '', ip: '1.1.1.1' }).ok).toBe(false); // without a phone id, the address is the phone
+    expect(q.take('u1').ok).toBe(true);
+    expect(q.take('u1').ok).toBe(true);
+    expect(q.take('u1').ok).toBe(false);
   });
 
   test('everything starts again the next Philippine day', () => {
     let now = Date.parse('2026-10-18T15:00:00Z');
-    const q = dailyQuota({ ...limits, guest: 1 }, () => now);
-    expect(q.take({ device: 'phone-a1', ip: '1.1.1.1' }).ok).toBe(true);
-    expect(q.take({ device: 'phone-a1', ip: '1.1.1.1' }).ok).toBe(false);
+    const q = dailyQuota({ account: 1, total: 10 }, () => now);
+    expect(q.take('u1').ok).toBe(true);
+    expect(q.take('u1').ok).toBe(false);
     now = Date.parse('2026-10-18T16:00:01Z');
-    expect(q.take({ device: 'phone-a1', ip: '1.1.1.1' }).ok).toBe(true);
+    expect(q.take('u1').ok).toBe(true);
   });
 
   test('0 means none; numbers from .env fall back to the default when missing or wrong', () => {
-    expect(dailyQuota({ ...limits, guest: 0 }).take({ device: 'phone-a1', ip: '1.1.1.1' })).toEqual({ ok: false, reason: 'device', limit: 0 });
+    expect(dailyQuota({ account: 0, total: 10 }).take('u1')).toEqual({ ok: false, reason: 'account', limit: 0 });
     const env = { A: '7', B: '', C: 'ten', D: '-1', E: '2.5', F: '0' };
     expect(['A', 'B', 'C', 'D', 'E', 'F', 'G'].map((k) => envCount(env, k, 5))).toEqual([7, 5, 5, 5, 5, 0, 5]);
   });
@@ -107,34 +103,28 @@ const fakeGemini = Bun.serve({
 });
 const AI = { ANTHROPIC_API_KEY: KEY, ANTHROPIC_BASE_URL: `http://127.0.0.1:${fakeAnthropic.port}`, AI_RATE_PER_MIN: '1000' };
 
+const mongo = await startMongo('limits tests');
 const servers: Srv[] = [];
+/** The real server with fake AI services and the throwaway MongoDB (each test gets its own database name). */
+let dbs = 0;
 async function server(env: Record<string, string>) {
-  const s = await startServer({ ...AI, ...env });
+  const s = await startServer({ ...AI, ...(mongo ? { MONGODB_URI: mongo.getUri(), MONGODB_DB: `may_ani_limits_${++dbs}` } : {}), ...env });
   servers.push(s);
   return s;
 }
 
-/** One call with the headers the app sends (phone id, login) and, for proxy tests, X-Forwarded-For. */
-async function ask(s: Srv, path: string, body: unknown, h: { device?: string; token?: string; xff?: string } = {}) {
+/** One call with the login and, for proxy tests, X-Forwarded-For. */
+async function ask(s: Srv, path: string, body: unknown, h: { token?: string; xff?: string } = {}) {
   const r = await fetch(s.url + path, {
     method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      ...(h.device ? { 'x-device-id': h.device } : {}),
-      ...(h.token ? { authorization: `Bearer ${h.token}` } : {}),
-      ...(h.xff ? { 'x-forwarded-for': h.xff } : {}),
-    },
+    headers: { 'content-type': 'application/json', ...(h.token ? { authorization: `Bearer ${h.token}` } : {}), ...(h.xff ? { 'x-forwarded-for': h.xff } : {}) },
     body: JSON.stringify(body),
   });
   return { status: r.status, body: (await r.json().catch(() => ({}))) as any };
 }
 const CHECK = { kind: 'plant', description: 'yellow leaves with brown spots' };
 const check = (s: Srv, h: Parameters<typeof ask>[3] = {}) => ask(s, '/api/ai/diagnose', CHECK, h);
-
-const mongo = await MongoMemoryServer.create().catch((e: Error) => {
-  console.warn(`\n[limits tests] SKIPPED the account allowance test: a test database could not start (${e.message}).\n`);
-  return null;
-});
+const PICTURE = { prompt: 'A raised vegetable bed made of coco lumber on the open ground in this photo, realistic.', image: { mediaType: 'image/jpeg', data: `/9j/${'A'.repeat(400)}` } };
 
 afterAll(async () => {
   for (const s of servers) s.stop();
@@ -143,84 +133,91 @@ afterAll(async () => {
   await mongo?.stop();
 });
 
-describe('daily allowance on the real server', () => {
-  test('a guest phone, then all guests on one address, run out with a clear message', async () => {
-    const s = await server({ AI_DAILY_GUEST: '2', AI_DAILY_GUEST_PER_IP: '3' });
-    expect((await check(s, { device: 'phone-aaaa1' })).status).toBe(200);
-    expect((await check(s, { device: 'phone-aaaa1' })).status).toBe(200);
-    const third = await check(s, { device: 'phone-aaaa1' });
+describe('AI needs a login', () => {
+  test('without accounts on the server, nobody can use AI', async () => {
+    const s = await startServer({ ...AI });
+    servers.push(s);
+    const r = await check(s);
+    expect(r.status).toBe(503);
+    expect(r.body.code).toBe('accounts_off');
+  });
+
+  test.skipIf(!mongo)('without a login, or with a wrong one, AI and pictures answer 401', async () => {
+    const s = await server({ GEMINI_API_KEY: 'test-not-a-real-key', GEMINI_BASE_URL: `http://127.0.0.1:${fakeGemini.port}` });
+    for (const token of [undefined, 'not-a-real-login-token-at-all']) {
+      const r = await check(s, { token });
+      expect(r.status).toBe(401);
+      expect(r.body.code).toBe('login');
+      expect((await ask(s, '/api/ai/render', PICTURE, { token })).status).toBe(401);
+    }
+  }, 30_000);
+});
+
+describe.skipIf(!mongo)('daily allowance on the real server', () => {
+  test('each account runs out on its own, with a clear message', async () => {
+    const s = await server({ AI_DAILY_ACCOUNT: '2' });
+    const juan = await signUpUser(s, 'Juan');
+    const ana = await signUpUser(s, 'Ana');
+    expect((await check(s, { token: juan.token })).status).toBe(200);
+    expect((await check(s, { token: juan.token })).status).toBe(200);
+    const third = await check(s, { token: juan.token });
     expect(third.status).toBe(429);
     expect(third.body.code).toBe('ai_quota');
-    expect(third.body.error).toContain("This phone has used today's 2 free AI checks");
-    expect(third.body.error).not.toContain('account'); // accounts are off on this server: nothing to sign up for
-    expect((await check(s, { device: 'phone-bbbb2' })).status).toBe(200);
-    const shared = await check(s, { device: 'phone-cccc3' });
-    expect(shared.status).toBe(429);
-    expect(shared.body.error).toContain('this internet connection');
-    expect((await fetch(`${s.url}/api/health`).then((r) => r.json()) as any).daily).toEqual({ ai: { guest: 2 }, pictures: { guest: 100000 } });
-  });
+    expect(third.body.error).toContain('You have used your 2 AI checks for today');
+    expect((await check(s, { token: ana.token })).status).toBe(200);
+    expect((await fetch(`${s.url}/api/health`).then((r) => r.json()) as any).daily).toEqual({ ai: 2, pictures: 100000 });
+  }, 30_000);
 
   test('the whole server stops at its daily total', async () => {
     const s = await server({ AI_DAILY_TOTAL: '1' });
-    expect((await check(s, { device: 'phone-aaaa1' })).status).toBe(200);
-    const r = await check(s, { device: 'phone-bbbb2' });
+    expect((await check(s, { token: (await signUpUser(s)).token })).status).toBe(200);
+    const r = await check(s, { token: (await signUpUser(s)).token });
     expect(r.status).toBe(429);
     expect(r.body.code).toBe('ai_daily_cap');
     expect(r.body.error).toContain('midnight (Philippine time)');
-  });
+  }, 30_000);
 
   test('a check that cost nothing (no AI credit) does not use up the allowance; a bad request is not counted', async () => {
-    const s = await server({ AI_DAILY_GUEST: '1' });
+    const s = await server({ AI_DAILY_ACCOUNT: '1' });
+    const { token } = await signUpUser(s);
     anthropic = () => Response.json({ type: 'error', error: { type: 'billing_error', message: 'Your credit balance is too low' } }, { status: 400 });
     try {
-      expect((await check(s, { device: 'phone-aaaa1' })).body.code).toBe('ai_billing');
+      expect((await check(s, { token })).body.code).toBe('ai_billing');
     } finally {
       anthropic = () => okAnswer();
     }
-    expect((await ask(s, '/api/ai/diagnose', { kind: 'plant' }, { device: 'phone-aaaa1' })).status).toBe(400); // nothing to check
-    expect((await check(s, { device: 'phone-aaaa1' })).status).toBe(200);
-    expect((await check(s, { device: 'phone-aaaa1' })).status).toBe(429);
-  });
+    expect((await ask(s, '/api/ai/diagnose', { kind: 'plant' }, { token })).status).toBe(400); // nothing to check
+    expect((await check(s, { token })).status).toBe(200);
+    expect((await check(s, { token })).status).toBe(429);
+  }, 30_000);
 
   test('AI pictures have their own allowance', async () => {
-    const s = await server({ GEMINI_API_KEY: 'test-not-a-real-key', GEMINI_BASE_URL: `http://127.0.0.1:${fakeGemini.port}`, PICTURES_DAILY_GUEST: '1' });
-    const picture = { prompt: 'A raised vegetable bed made of coco lumber on the open ground in this photo, realistic.', image: { mediaType: 'image/jpeg', data: `/9j/${'A'.repeat(400)}` } };
-    expect((await ask(s, '/api/ai/render', picture, { device: 'phone-aaaa1' })).status).toBe(200);
-    const r = await ask(s, '/api/ai/render', picture, { device: 'phone-aaaa1' });
+    const s = await server({ GEMINI_API_KEY: 'test-not-a-real-key', GEMINI_BASE_URL: `http://127.0.0.1:${fakeGemini.port}`, PICTURES_DAILY_ACCOUNT: '1' });
+    const { token } = await signUpUser(s);
+    expect((await ask(s, '/api/ai/render', PICTURE, { token })).status).toBe(200);
+    const r = await ask(s, '/api/ai/render', PICTURE, { token });
     expect(r.status).toBe(429);
     expect(r.body.error).toContain('AI pictures');
-    expect((await check(s, { device: 'phone-aaaa1' })).status).toBe(200); // photo checks are counted separately
-  });
-
-  test.skipIf(!mongo)('an account gets its own, bigger allowance', async () => {
-    const s = await server({ MONGODB_URI: mongo!.getUri(), MONGODB_DB: 'may_ani_limits_test', AI_DAILY_GUEST: '1', AI_DAILY_ACCOUNT: '2' });
-    const signup = await ask(s, '/api/auth/signup', { name: 'Juan', email: 'juan.limits@example.com', password: 'Tatlong kalabaw sa bukid' });
-    expect(signup.status).toBe(201);
-    const token = signup.body.token as string;
-    expect((await check(s, { device: 'phone-aaaa1' })).status).toBe(200);
-    const guest = await check(s, { device: 'phone-aaaa1' });
-    expect(guest.body.error).toContain('Create a free account in Settings to get 2 a day');
-    expect((await check(s, { device: 'phone-aaaa1', token })).status).toBe(200);
-    expect((await check(s, { device: 'phone-aaaa1', token })).status).toBe(200);
-    const done = await check(s, { device: 'phone-aaaa1', token });
-    expect(done.status).toBe(429);
-    expect(done.body.error).toContain('You have used your 2 AI checks for today');
-    expect((await check(s, { device: 'phone-aaaa1', token: 'not-a-real-login-token-at-all' })).status).toBe(429); // a wrong login counts as the guest
+    expect((await check(s, { token })).status).toBe(200); // photo checks are counted separately
   }, 30_000);
 });
 
 describe('the caller\'s address on the real server', () => {
-  test('without TRUST_PROXY, a made-up X-Forwarded-For does not get a fresh allowance', async () => {
-    const s = await server({ AI_DAILY_GUEST_PER_IP: '1' });
-    expect((await check(s, { xff: '198.51.100.1' })).status).toBe(200);
+  // Rate limits count per address. With AI_RATE_PER_MIN=1 a second call from the same address is refused (429) before the
+  // login is even checked; from another address it reaches the login check (503 here, as accounts are off).
+  test('without TRUST_PROXY, a made-up X-Forwarded-For does not get a fresh limit', async () => {
+    const s = await startServer({ ...AI, AI_RATE_PER_MIN: '1' });
+    servers.push(s);
+    expect((await check(s, { xff: '198.51.100.1' })).status).toBe(503);
     expect((await check(s, { xff: '198.51.100.2' })).status).toBe(429);
   });
 
   test('with TRUST_PROXY=loopback, each user behind the proxy is counted on their own', async () => {
-    const s = await server({ AI_DAILY_GUEST_PER_IP: '1', TRUST_PROXY: 'loopback' });
+    const s = await startServer({ ...AI, AI_RATE_PER_MIN: '1', TRUST_PROXY: 'loopback' });
+    servers.push(s);
     expect(s.log()).toContain('proxy: trusted (127.0.0.1, ::1)');
-    expect((await check(s, { xff: '198.51.100.1' })).status).toBe(200);
-    expect((await check(s, { xff: '198.51.100.2' })).status).toBe(200);
+    expect((await check(s, { xff: '198.51.100.1' })).status).toBe(503);
+    expect((await check(s, { xff: '198.51.100.2' })).status).toBe(503);
     expect((await check(s, { xff: '198.51.100.1' })).status).toBe(429);
   });
 });
@@ -229,7 +226,8 @@ describe('security headers', () => {
   const NEEDED = ['content-security-policy', 'x-content-type-options', 'x-frame-options', 'referrer-policy', 'permissions-policy', 'cross-origin-opener-policy'];
 
   test('on API answers, files, refusals and CORS checks; no HSTS on plain http', async () => {
-    const s = await server({});
+    const s = await startServer({});
+    servers.push(s);
     const answers = [
       await fetch(`${s.url}/api/health`),
       await fetch(`${s.url}/..%2F.env`), // refused (403)
@@ -245,11 +243,12 @@ describe('security headers', () => {
     expect(csp).toContain("frame-ancestors 'none'");
     expect(csp).toContain('https://tile.openstreetmap.org');
     expect(answers[0].headers.get('x-content-type-options')).toBe('nosniff');
-    expect(answers[3].headers.get('access-control-allow-headers')).toContain('X-Device-Id');
+    expect(answers[3].headers.get('access-control-allow-headers')).toContain('Authorization');
   });
 
   test('a real website with https gets HSTS and upgrades plain http', async () => {
-    const s = await server({ APP_URL: 'https://may-ani.example', MONGODB_URI: OFF });
+    const s = await startServer({ APP_URL: 'https://may-ani.example', MONGODB_URI: OFF });
+    servers.push(s);
     const r = await fetch(`${s.url}/api/health`);
     expect(r.headers.get('strict-transport-security')).toBe('max-age=15552000');
     expect(r.headers.get('content-security-policy')).toContain('upgrade-insecure-requests');

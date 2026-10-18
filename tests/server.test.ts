@@ -4,9 +4,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { call, sleep, startServer } from './support/server';
+import { call, signUpUser, sleep, startMongo, startServer } from './support/server';
 
 /** Small server safety fixes from the October 2026 review: static files, broken addresses, chat data file, picture errors. */
+
+const mongo = await startMongo('server tests'); // chat and pictures need a logged-in user
+afterAll(async () => { await mongo?.stop(); });
+const withDb = (): Record<string, string> => (mongo ? { MONGODB_URI: mongo.getUri(), MONGODB_DB: 'may_ani_server_test' } : {});
 
 declare const Bun: {
   serve(o: { port: number; hostname: string; fetch(req: Request): Response | Promise<Response> }): { port: number; stop(force?: boolean): void };
@@ -23,32 +27,34 @@ describe('static files', () => {
     } finally {
       srv.stop();
     }
-  });
+  }, 30_000);
 });
 
 describe('chat data file', () => {
   const dir = mkdtempSync(join(tmpdir(), 'may-ani-chat-'));
   afterAll(() => rmSync(dir, { recursive: true, force: true }));
 
-  test('a damaged file is moved aside, never overwritten, and new chat data is saved whole', async () => {
+  test.skipIf(!mongo)('a damaged file is moved aside, never overwritten, and new chat data is saved whole', async () => {
     writeFileSync(join(dir, 'data.json'), '{"users":{"u1":{"id":"u1"');
-    const srv = await startServer({}, dir);
+    const srv = await startServer(withDb(), dir);
     try {
       const aside = readdirSync(dir).filter((f) => f.startsWith('data.json.damaged-'));
       expect(aside.length).toBe(1);
       expect(readFileSync(join(dir, aside[0]), 'utf8')).toBe('{"users":{"u1":{"id":"u1"');
       expect(srv.log()).toContain('could not be read');
 
-      const r = await call(srv, 'POST', '/api/chat/register', { id: 'farmer-1', name: 'Juan', role: 'farmer' });
+      const juan = await signUpUser(srv, 'Juan');
+      const r = await call(srv, 'POST', '/api/chat/register', { blurb: 'Davao City' }, juan.token);
       expect(r.status).toBe(200);
       await sleep(1200); // saves are grouped for half a second
       const saved = JSON.parse(readFileSync(join(dir, 'data.json'), 'utf8'));
-      expect(saved.users['farmer-1'].name).toBe('Juan');
+      expect(saved.users[r.body.id].name).toBe('Juan');
+      expect(JSON.stringify(saved)).not.toContain(juan.token); // the login token is never written to the chat file
       expect(existsSync(join(dir, 'data.json.tmp'))).toBe(false);
     } finally {
       srv.stop();
     }
-  });
+  }, 30_000);
 });
 
 describe('starting twice', () => {
@@ -84,13 +90,14 @@ describe('picture errors', () => {
   });
   afterAll(() => fake.stop(true));
 
-  test("the provider's own words stay in the server log", async () => {
-    const srv = await startServer({ GEMINI_API_KEY: 'test-not-a-real-key', GEMINI_BASE_URL: `http://127.0.0.1:${fake.port}` });
+  test.skipIf(!mongo)("the provider's own words stay in the server log", async () => {
+    const srv = await startServer({ ...withDb(), GEMINI_API_KEY: 'test-not-a-real-key', GEMINI_BASE_URL: `http://127.0.0.1:${fake.port}` });
     try {
+      const { token } = await signUpUser(srv);
       const r = await call(srv, 'POST', '/api/ai/render', {
         prompt: 'A raised vegetable bed made of coco lumber on the open ground in this photo, realistic.',
         image: { mediaType: 'image/jpeg', data: '/9j/' + 'A'.repeat(400) },
-      });
+      }, token);
       expect(r.status).toBe(502);
       expect(r.body.error).toContain('error 400');
       expect(r.body.error).not.toContain('4711');

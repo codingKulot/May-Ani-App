@@ -17,35 +17,16 @@ export interface ServerStatus {
   model?: string;
   /** which image model is set up on the server for realistic pictures, if any */
   render?: 'gemini' | 'openai';
-  /** today's free uses: per guest phone, and per account when accounts are on */
-  daily?: { ai: DailyAllowance; pictures: DailyAllowance };
-}
-export interface DailyAllowance { guest: number; account?: number }
-
-const DEVICE_KEY = 'may-ani.device.v1';
-/**
- * A random id for this phone, made once. The server counts a guest's free AI uses per phone with it (many phones can share one
- * mobile-data internet address). It says nothing about the person and is never part of app data or backups.
- */
-function deviceId(): string {
-  try {
-    let id = localStorage.getItem(DEVICE_KEY);
-    if (!id) {
-      id = typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `d-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-      localStorage.setItem(DEVICE_KEY, id);
-    }
-    return id;
-  } catch {
-    return '';
-  }
+  /** AI uses per account per day */
+  daily?: { ai: number; pictures: number };
 }
 
-/** Headers for paid AI calls: the login (accounts get a bigger daily allowance) and this phone's id (for guests). */
-function paidHeaders(): Record<string, string> {
+/** The login for calls that need one (AI and chat: May-Ani is for logged-in users only). */
+function loginHeader(): Record<string, string> {
   const token = sessionToken();
-  const device = deviceId();
-  return { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(device ? { 'X-Device-Id': device } : {}) };
+  return token ? { Authorization: `Bearer ${token}` } : {};
 }
+const paidHeaders = loginHeader;
 
 /**
  * Where the May-Ani server lives. Blank setting = same origin (when the server also serves the app).
@@ -194,29 +175,24 @@ export async function aiRenderPicture(image: ImagePayload, prompt: string): Prom
   return `data:${out.image.mediaType};base64,${out.image.data}`;
 }
 
-const TOKEN_KEY = 'may-ani.chatToken';
-const getToken = () => { try { return localStorage.getItem(TOKEN_KEY) ?? ''; } catch { return ''; } };
-const setToken = (t: string) => { try { localStorage.setItem(TOKEN_KEY, t); } catch { /* ignore */ } };
-const auth = (): Record<string, string> => (getToken() ? { Authorization: `Bearer ${getToken()}` } : {});
-
 export interface DirectoryUser { id: string; name: string; role: string; blurb: string }
 export interface ServerMessage { id: string; from: string; to: string; text: string; at: string }
 
+/** Chat on the server (server/index.mjs). Every call carries the account login: only logged-in users can chat. */
 export const chatApi = {
+  /** Joins (or updates) the logged-in user. The server answers with their chat id, the same on every phone. */
+  register: async (u: { blurb: string }) =>
+    (await call<{ ok: true; id: string }>('/api/chat/register', { method: 'POST', body: JSON.stringify(u), headers: loginHeader() })).id,
+  directory: () => call<{ users: DirectoryUser[] }>('/api/chat/directory', { headers: loginHeader() }),
+  history: () => call<{ messages: ServerMessage[] }>('/api/chat/history', { headers: loginHeader() }),
+  send: (m: { to: string; text: string }) =>
+    call<{ id: string; at: string }>('/api/chat/send', { method: 'POST', body: JSON.stringify(m), headers: loginHeader() }),
   /**
-   * Joins (or updates) this user. `session` is the account login, when logged in: the server then answers with the account's
-   * own chat id (the same on every phone). The private token it returns authorises later calls.
+   * The web address of the live message stream. The browser's EventSource cannot send the login, so the server gives a
+   * one-time ticket for it (valid one minute): the login token itself never goes into a web address.
    */
-  register: async (u: { id: string; name: string; role: string; blurb: string; session?: string }) => {
-    const out = await call<{ ok: true; id?: string; token: string }>('/api/chat/register', { method: 'POST', body: JSON.stringify(u), headers: auth() });
-    setToken(out.token);
-    return { id: out.id ?? u.id, token: out.token };
+  streamUrl: async () => {
+    const { ticket } = await call<{ ticket: string }>('/api/chat/ticket', { method: 'POST', headers: loginHeader() });
+    return `${apiBase()}/api/chat/stream?ticket=${encodeURIComponent(ticket)}`;
   },
-  directory: () => call<{ users: DirectoryUser[] }>('/api/chat/directory'),
-  history: (userId: string) =>
-    call<{ messages: ServerMessage[] }>(`/api/chat/history?userId=${encodeURIComponent(userId)}`, { headers: auth() }),
-  send: (m: { from: string; to: string; text: string }) =>
-    call<{ id: string; at: string }>('/api/chat/send', { method: 'POST', body: JSON.stringify(m), headers: auth() }),
-  streamUrl: (userId: string) =>
-    `${apiBase()}/api/chat/stream?userId=${encodeURIComponent(userId)}&token=${encodeURIComponent(getToken())}`,
 };

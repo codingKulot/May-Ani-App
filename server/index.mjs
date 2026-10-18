@@ -1,7 +1,7 @@
 // May-Ani server - Node 20+ / Bun. Optional packages, loaded only when switched on: mongodb (accounts), nodemailer (email).
 //   * Serves the built PWA from ./dist
-//   * /api/ai/*   : Claude vision for plant/animal/fish diagnosis, site-photo analysis and build surveys
-//   * /api/chat/* : real-time messaging between farmers, suppliers and buyers (SSE)
+//   * /api/ai/*   : Claude vision for plant/animal/fish diagnosis, site-photo analysis and build surveys (logged-in users only)
+//   * /api/chat/* : real-time messaging between farmers, suppliers and buyers (SSE; logged-in users only)
 //   * /api/auth/* : accounts (sign up, log in, log out, profile) stored in MongoDB, see server/auth.mjs;
 //                   "forgot your password?" by email (/api/auth/forgot, /api/auth/reset), see server/reset.mjs and server/mail.mjs
 //   * /api/sync   : the logged-in user's farms, plans and records, so they follow the account to a new phone, see server/sync.mjs
@@ -18,14 +18,13 @@
 //       Password reset email (optional): SMTP_USER (Gmail address), SMTP_PASSWORD (Gmail app password), EMAIL_FROM,
 //       APP_URL (where the link in the email opens the app, default http://localhost:PORT), RESET_RATE_PER_MIN (5 per IP),
 //       SMTP_HOST (smtp.gmail.com), SMTP_PORT (465)
-//       Daily AI allowance (server/limits.mjs): AI_DAILY_GUEST (5 per guest phone), AI_DAILY_GUEST_PER_IP (30), AI_DAILY_ACCOUNT (20),
-//       AI_DAILY_TOTAL (300 for the whole server), PICTURES_DAILY_GUEST (3), PICTURES_DAILY_GUEST_PER_IP (15),
-//       PICTURES_DAILY_ACCOUNT (9), PICTURES_DAILY_TOTAL (60). Behind a proxy: TRUST_PROXY (loopback | a number | proxy IPs).
+//       Daily AI allowance (server/limits.mjs, logged-in accounts only): AI_DAILY_ACCOUNT (20), AI_DAILY_TOTAL (300 for the whole
+//       server), PICTURES_DAILY_ACCOUNT (9), PICTURES_DAILY_TOTAL (60). Behind a proxy: TRUST_PROXY (loopback | a number | proxy IPs).
 
 import http from 'node:http';
 import { readFile, rename, writeFile, stat } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
-import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { authRoutes, dbProblem, openAccounts } from './auth.mjs';
@@ -95,7 +94,7 @@ const json = (res, code, body, extra = {}) => {
 };
 const cors = () => ({
   'Access-Control-Allow-Origin': ALLOWED_ORIGIN,
-  'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Device-Id',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
 });
 
@@ -124,13 +123,6 @@ function limited(req, bucket, max, windowMs = 60_000) {
 setInterval(() => { const now = Date.now(); for (const [k, v] of hits) if (now - v.start > 120_000) hits.delete(k); }, 60_000).unref();
 
 const str = (v, max) => (typeof v === 'string' ? v.slice(0, max) : '');
-const safeEq = (a, b) => { const x = Buffer.from(String(a)); const y = Buffer.from(String(b)); return x.length === y.length && timingSafeEqual(x, y); };
-
-function authUser(req, userId) {
-  const token = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
-  const u = db.users[userId];
-  return !!(u && token && safeEq(u.token, token));
-}
 
 // ------------------------------------------------------------------ accounts (MongoDB)
 const MONGODB_URI = (process.env.MONGODB_URI || '').trim();
@@ -178,54 +170,56 @@ const handleAuth = accounts
   ? authRoutes(accounts, { json, readJson, limited }, AUTH_RATE, ({ unlock }) => resetRoutes(accounts, { json, readJson, limited }, {
     mailer, appUrl: APP_URL, unlock, forgotPerMinute: Number(process.env.RESET_RATE_PER_MIN) || 5, resetPerMinute: AUTH_RATE,
   }))
-  : (_req, res) => json(res, 503, { error: 'Accounts are not set up on this server yet. Use guest mode, or ask the owner to add MONGODB_URI to the .env file.' });
+  : (_req, res) => json(res, 503, { error: 'Accounts are not set up on this server yet, so nobody can log in. The server owner needs to add MONGODB_URI to the .env file.' });
 const handleSync = accounts
   ? syncRoutes(accounts, { json, readJson, limited }, { perMinute: Number(process.env.SYNC_RATE_PER_MIN) || 120, dbProblem })
   : (_req, res) => json(res, 503, { error: 'Accounts are not set up on this server yet, so farm data cannot be saved to an account. It is safe on this phone.' });
 
-// ------------------------------------------------------------------ daily allowance for paid AI (server/limits.mjs)
-// Every photo check and every picture costs money on the owner's accounts. Guests get a few per phone per day (the app sends a
-// random phone id; many phones can share one mobile-data IP address, so the address gets a bigger guest total), accounts get more,
-// and the whole server has a daily total. The numbers come from .env; 0 means none.
-const LIMITS = {
-  ai: {
-    guest: envCount(process.env, 'AI_DAILY_GUEST', 5), guestPerIp: envCount(process.env, 'AI_DAILY_GUEST_PER_IP', 30),
-    account: envCount(process.env, 'AI_DAILY_ACCOUNT', 20), total: envCount(process.env, 'AI_DAILY_TOTAL', 300),
-  },
-  pictures: {
-    guest: envCount(process.env, 'PICTURES_DAILY_GUEST', 3), guestPerIp: envCount(process.env, 'PICTURES_DAILY_GUEST_PER_IP', 15),
-    account: envCount(process.env, 'PICTURES_DAILY_ACCOUNT', 9), total: envCount(process.env, 'PICTURES_DAILY_TOTAL', 60),
-  },
-};
-const quotas = { ai: dailyQuota(LIMITS.ai), pictures: dailyQuota(LIMITS.pictures) };
-const DEVICE_RE = /^[A-Za-z0-9_-]{8,64}$/;
+// ------------------------------------------------------------------ who is logged in
+// May-Ani is for logged-in users only (no guest mode since 18 October 2026): AI and chat need an account login on every call.
+const bearer = (req) => (req.headers.authorization || '').replace(/^Bearer\s+/i, '').trim();
 
-/** A logged-in account (by its login), or a guest (by the app's random phone id, plus the IP address). */
-async function whoIsAsking(req) {
-  const ip = clientIp(req, TRUST);
-  const token = (req.headers.authorization || '').replace(/^Bearer\s+/i, '').trim();
-  if (accounts && token) {
-    try {
-      const user = await accounts.userForToken(token);
-      if (user) return { userId: String(user._id), ip };
-    } catch { /* the database cannot be reached: count this as a guest rather than refuse */ }
+/** The logged-in account behind a request. Otherwise answers (401 not logged in, 503 accounts off or database down) and returns null. */
+async function loggedIn(req, res) {
+  if (!accounts) {
+    json(res, 503, { error: 'Accounts are not set up on this server yet, so nobody can log in. The server owner needs to add MONGODB_URI to the .env file.', code: 'accounts_off' });
+    return null;
   }
-  const device = String(req.headers['x-device-id'] || '');
-  return { device: DEVICE_RE.test(device) ? device : '', ip };
+  let user = null;
+  try {
+    user = await accounts.userForToken(bearer(req));
+  } catch (e) {
+    console.error(`Accounts: ${dbProblem(e) || 'the login could not be checked.'} (${e.message})`);
+    json(res, 503, { error: 'The account database cannot be reached right now. Please try again in a minute.', code: 'accounts_down' });
+    return null;
+  }
+  if (!user) json(res, 401, { error: 'Please log in again.', code: 'login' });
+  return user;
 }
 
-/** Takes one use of today's allowance (`kind`: ai or pictures). When none is left, answers 429 with the reason and returns null. */
+// ------------------------------------------------------------------ daily allowance for paid AI (server/limits.mjs)
+// Every photo check and every picture costs money on the owner's accounts. Each account gets a number per day, and the whole
+// server has a daily total. The numbers come from .env; 0 means none.
+const LIMITS = {
+  ai: { account: envCount(process.env, 'AI_DAILY_ACCOUNT', 20), total: envCount(process.env, 'AI_DAILY_TOTAL', 300) },
+  pictures: { account: envCount(process.env, 'PICTURES_DAILY_ACCOUNT', 9), total: envCount(process.env, 'PICTURES_DAILY_TOTAL', 60) },
+};
+const quotas = { ai: dailyQuota(LIMITS.ai), pictures: dailyQuota(LIMITS.pictures) };
+
+/**
+ * Checks the login, then takes one use of the account's allowance for today (`kind`: ai or pictures).
+ * Answers 401 (not logged in) or 429 (none left) and returns null when the call may not go ahead.
+ */
 async function takeQuota(req, res, kind) {
-  const r = quotas[kind].take(await whoIsAsking(req));
+  const user = await loggedIn(req, res);
+  if (!user) return null;
+  const r = quotas[kind].take(String(user._id));
   if (r.ok) return r;
   const what = kind === 'ai' ? 'AI checks' : 'AI pictures';
   const again = 'They start again at midnight (Philippine time).';
-  const signUp = accounts && LIMITS[kind].account > 0 ? ` Create a free account in Settings to get ${LIMITS[kind].account} a day.` : '';
   const error = r.reason === 'total' ? `The May-Ani server has used all of today's ${what}. ${again}`
-    : r.reason === 'account' ? `You have used your ${r.limit} ${what} for today. ${again}`
-      : r.limit === 0 ? `${what} on this server need an account.${signUp}`
-        : r.reason === 'device' ? `This phone has used today's ${r.limit} free ${what}. ${again}${signUp}`
-          : `Guests on this internet connection have used today's free ${what}. ${again}${signUp}`;
+    : r.limit === 0 ? `${what} are switched off on this server.`
+      : `You have used your ${r.limit} ${what} for today. ${again}`;
   json(res, 429, { error, code: r.reason === 'total' ? 'ai_daily_cap' : 'ai_quota' });
   return null;
 }
@@ -587,73 +581,66 @@ async function handleRender(req, res) {
   json(res, 200, { image: out, provider });
 }
 
-// ------------------------------------------------------------------ chat
-const streams = new Map(); // userId -> Set<res>
-
+// ------------------------------------------------------------------ chat (logged-in users only)
+// Everyone in the chat is a May-Ani account: their chat id is "acct-<account id>", the same on every phone, with the account's
+// name and role. Every call needs the account login (Authorization: Bearer <login token>), so nobody can read the list of
+// people, write to them or pretend to be someone without logging in. There is no separate chat password.
+// The live stream cannot send that header (the browser's EventSource has no headers), so it uses a ticket from
+// POST /api/chat/ticket: random, for one connection only, valid for one minute. The login token never goes into a web address.
+// Chat users from before 18 October 2026 that are not accounts (guests, phone ids) are no longer listed or reachable.
 const ACCOUNT_CHAT = 'acct-';
+const isAccountChat = (id) => typeof id === 'string' && id.startsWith(ACCOUNT_CHAT);
+const chatIdOf = (user) => `${ACCOUNT_CHAT}${String(user._id)}`;
 const ROLES = ['farmer', 'supplier', 'buyer', 'expert'];
+const STREAMS_PER_USER = 5; // a few phones and tabs at once; older connections close first
+const TICKET_MS = 60_000;
+const streams = new Map(); // chat id -> Set<res>
+const tickets = new Map(); // ticket -> { id, until }
+setInterval(() => { const now = Date.now(); for (const [t, v] of tickets) if (v.until < now) tickets.delete(t); }, 60_000).unref();
 
-/**
- * Joins the chat and answers { id, token }: the chat identity to use and its chat token.
- *   * A guest is known by the phone's own id (b.id) plus the chat token the server gave that phone.
- *   * A logged-in user also sends their account login (b.session). Their chat identity is then "acct-<account id>" on every
- *     phone, with the account's name and role. The phone's earlier guest chat is moved into the account when the phone proves
- *     it is its own (the guest's chat token): its messages stay in their conversations and the guest leaves the directory.
- */
+/** Joins the chat as the logged-in account (or updates its name, role and place) and answers { id }: this user's chat id. */
 async function handleRegister(req, res) {
   if (limited(req, 'reg', 20)) return json(res, 429, { error: 'Too many requests.' });
+  const account = await loggedIn(req, res);
+  if (!account) return;
   const b = await readJson(req);
-  const deviceId = str(b.id, 64).replace(/[^\w-]/g, '');
-  const token = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
-  let account = null;
-  if (accounts && typeof b.session === 'string' && b.session) {
-    try { account = await accounts.userForToken(b.session); } catch { /* database unreachable: join as this phone for now */ }
-  }
-  if (!account && deviceId.startsWith(ACCOUNT_CHAT)) return json(res, 400, { error: 'That chat id is for accounts.' });
-  const id = account ? `${ACCOUNT_CHAT}${String(account._id)}` : deviceId;
-  const name = str(account ? account.name : b.name, 60).trim();
-  if (!id || !name) return json(res, 400, { error: 'id and name are required' });
-  const role = ROLES.includes(account ? account.role : b.role) ? (account ? account.role : b.role) : 'farmer';
-  const existing = db.users[id];
-  // A guest id belongs to the phone holding its chat token; an account id to whoever is logged in to the account.
-  if (!account && existing && !(token && safeEq(existing.token, token))) return json(res, 409, { error: 'This user already exists.' });
-  const user = existing || { id, token: randomBytes(24).toString('hex'), createdAt: new Date().toISOString() };
-  Object.assign(user, { name, role, blurb: str(b.blurb, 140) });
+  const id = chatIdOf(account);
+  const user = db.users[id] || { id, createdAt: new Date().toISOString() };
+  Object.assign(user, { name: str(account.name, 60), role: ROLES.includes(account.role) ? account.role : 'farmer', blurb: str(b.blurb, 140) });
+  delete user.token; // the separate chat password of earlier versions
   db.users[id] = user;
-
-  const guest = account && deviceId && deviceId !== id ? db.users[deviceId] : undefined;
-  if (guest && token && safeEq(guest.token, token)) {
-    for (const m of db.messages) {
-      if (m.from === deviceId) m.from = id;
-      if (m.to === deviceId) m.to = id;
-    }
-    db.messages = db.messages.filter((m) => m.from !== m.to); // what the guest sent to this same account
-    delete db.users[deviceId];
-    for (const r of streams.get(deviceId) ?? []) r.end();
-    streams.delete(deviceId);
-  }
   save();
-  json(res, 200, { ok: true, id, token: user.token });
+  json(res, 200, { ok: true, id });
 }
 
-function handleDirectory(_req, res) {
-  const users = Object.values(db.users).map(({ id, name, role, blurb }) => ({ id, name, role, blurb }));
+/** Everyone who joined the chat (accounts only). Needs a login. */
+async function handleDirectory(req, res) {
+  if (!(await loggedIn(req, res))) return;
+  const users = Object.values(db.users).filter((u) => isAccountChat(u.id)).map(({ id, name, role, blurb }) => ({ id, name, role, blurb }));
   json(res, 200, { users });
 }
 
-function handleHistory(req, res, url) {
-  const userId = url.searchParams.get('userId') || '';
-  if (!authUser(req, userId)) return json(res, 401, { error: 'Unauthorized' });
-  const messages = db.messages.filter((m) => m.from === userId || m.to === userId).slice(-500);
+/** The logged-in user's last 500 messages with other accounts. */
+async function handleHistory(req, res) {
+  const account = await loggedIn(req, res);
+  if (!account) return;
+  const me = chatIdOf(account);
+  const messages = db.messages
+    .filter((m) => (m.from === me || m.to === me) && isAccountChat(m.from) && isAccountChat(m.to) && m.from !== m.to)
+    .slice(-500);
   json(res, 200, { messages });
 }
 
 async function handleSend(req, res) {
   if (limited(req, 'send', 60)) return json(res, 429, { error: 'Slow down a little.' });
+  const account = await loggedIn(req, res);
+  if (!account) return;
   const b = await readJson(req);
-  const from = str(b.from, 64); const to = str(b.to, 64); const text = str(b.text, 2000).trim();
-  if (!authUser(req, from)) return json(res, 401, { error: 'Unauthorized' });
-  if (!db.users[to]) return json(res, 404, { error: 'Recipient not found' });
+  const from = chatIdOf(account); // always the logged-in account: nobody can send in someone else's name
+  const to = str(b.to, 64);
+  const text = str(b.text, 2000).trim();
+  if (!db.users[from]) return json(res, 409, { error: 'Open Community once to join the chat.' });
+  if (!isAccountChat(to) || !db.users[to] || to === from) return json(res, 404, { error: 'Recipient not found' });
   if (!text) return json(res, 400, { error: 'Message is empty' });
   const msg = { id: randomBytes(8).toString('hex'), from, to, text, at: new Date().toISOString() };
   db.messages.push(msg);
@@ -663,18 +650,32 @@ async function handleSend(req, res) {
   json(res, 200, { id: msg.id, at: msg.at });
 }
 
+/** A one-time ticket for the live stream (see above). */
+async function handleTicket(req, res) {
+  if (limited(req, 'ticket', 30)) return json(res, 429, { error: 'Too many requests.' });
+  const account = await loggedIn(req, res);
+  if (!account) return;
+  const id = chatIdOf(account);
+  if (!db.users[id]) return json(res, 409, { error: 'Open Community once to join the chat.' });
+  const ticket = randomBytes(24).toString('base64url');
+  tickets.set(ticket, { id, until: Date.now() + TICKET_MS });
+  json(res, 200, { ticket });
+}
+
+/** Live messages for the user named by a one-time ticket (server-sent events). */
 function handleStream(req, res, url) {
-  const userId = url.searchParams.get('userId') || '';
-  // EventSource cannot set headers, so the token also travels as a query param for this one endpoint.
-  const token = url.searchParams.get('token') || (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
-  const u = db.users[userId];
-  if (!u || !token || !safeEq(u.token, token)) return json(res, 401, { error: 'Unauthorized' });
+  const ticket = url.searchParams.get('ticket') || '';
+  const t = tickets.get(ticket);
+  tickets.delete(ticket); // used up, whatever happens
+  if (!t || t.until < Date.now() || !db.users[t.id]) return json(res, 401, { error: 'Please connect again.' });
   res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive', ...cors() });
   res.write(': connected\n\n');
-  if (!streams.has(userId)) streams.set(userId, new Set());
-  streams.get(userId).add(res);
+  if (!streams.has(t.id)) streams.set(t.id, new Set());
+  const mine = streams.get(t.id);
+  if (mine.size >= STREAMS_PER_USER) { const oldest = mine.values().next().value; mine.delete(oldest); oldest.end(); }
+  mine.add(res);
   const ping = setInterval(() => res.write(': ping\n\n'), 25_000);
-  req.on('close', () => { clearInterval(ping); streams.get(userId)?.delete(res); });
+  req.on('close', () => { clearInterval(ping); mine.delete(res); });
 }
 
 // ------------------------------------------------------------------ static files
@@ -701,11 +702,10 @@ const server = http.createServer(async (req, res) => {
   try {
     if (req.method === 'OPTIONS') { res.writeHead(204, cors()); return res.end(); }
     if (url.pathname === '/api/health') {
-      // `daily`: today's free AI uses per guest phone and per account, so the app can tell people before they run out
-      const daily = (k) => ({ guest: LIMITS[k].guest, ...(accounts ? { account: LIMITS[k].account } : {}) });
+      // `daily`: AI uses per account per day, so the app can tell people before they run out. Chat and AI need accounts.
       return json(res, 200, {
-        ai: !!API_KEY, chat: true, accounts: !!accounts, reset: !!(accounts && mailer), model: API_KEY ? MODEL : undefined, render: imageProvider(),
-        daily: { ai: daily('ai'), pictures: daily('pictures') },
+        ai: !!API_KEY, chat: !!accounts, accounts: !!accounts, reset: !!(accounts && mailer), model: API_KEY ? MODEL : undefined, render: imageProvider(),
+        daily: { ai: LIMITS.ai.account, pictures: LIMITS.pictures.account },
       });
     }
     if (url.pathname.startsWith('/api/auth/')) return await handleAuth(req, res, url);
@@ -715,9 +715,10 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'POST' && url.pathname === '/api/ai/survey') return await handleSurvey(req, res);
     if (req.method === 'POST' && url.pathname === '/api/ai/render') return await handleRender(req, res);
     if (req.method === 'POST' && url.pathname === '/api/chat/register') return await handleRegister(req, res);
-    if (req.method === 'GET' && url.pathname === '/api/chat/directory') return handleDirectory(req, res);
-    if (req.method === 'GET' && url.pathname === '/api/chat/history') return handleHistory(req, res, url);
+    if (req.method === 'GET' && url.pathname === '/api/chat/directory') return await handleDirectory(req, res);
+    if (req.method === 'GET' && url.pathname === '/api/chat/history') return await handleHistory(req, res);
     if (req.method === 'POST' && url.pathname === '/api/chat/send') return await handleSend(req, res);
+    if (req.method === 'POST' && url.pathname === '/api/chat/ticket') return await handleTicket(req, res);
     if (req.method === 'GET' && url.pathname === '/api/chat/stream') return handleStream(req, res, url);
     if (url.pathname.startsWith('/api/')) return json(res, 404, { error: 'Not found' });
     if (req.method === 'GET') return await serveStatic(req, res, url);
@@ -742,8 +743,9 @@ server.on('error', (e) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`May-Ani server on http://localhost:${PORT}  |  AI: ${API_KEY ? `on (${MODEL})` : 'OFF - add ANTHROPIC_API_KEY to the .env file'}  |  pictures: ${imageProvider() ?? 'OFF - add GEMINI_API_KEY or OPENAI_API_KEY'}  |  chat: on  |  accounts: ${accounts ? 'on (MongoDB)' : accountsOff}  |  email: ${mailer ? `on (${mailer.host}), reset links open ${APP_URL}` : emailOff}`);
-  const day = (k) => `${LIMITS[k].guest} per guest phone, ${LIMITS[k].account} per account, ${LIMITS[k].total} in total`;
+  console.log(`May-Ani server on http://localhost:${PORT}  |  AI: ${API_KEY ? `on (${MODEL})` : 'OFF - add ANTHROPIC_API_KEY to the .env file'}  |  pictures: ${imageProvider() ?? 'OFF - add GEMINI_API_KEY or OPENAI_API_KEY'}  |  chat: ${accounts ? 'on' : 'OFF - needs accounts'}  |  accounts: ${accounts ? 'on (MongoDB)' : accountsOff}  |  email: ${mailer ? `on (${mailer.host}), reset links open ${APP_URL}` : emailOff}`);
+  if (!accounts) console.error('Warning: May-Ani is for logged-in users only, and accounts are OFF, so nobody can log in or use the app. Add MONGODB_URI to the .env file.');
+  const day = (k) => `${LIMITS[k].account} per account, ${LIMITS[k].total} in total`;
   console.log(`Daily limits: AI checks ${day('ai')}; pictures ${day('pictures')}.  |  proxy: ${TRUST.mode === 'off' ? 'none (TRUST_PROXY off)' : `trusted (${describeTrust(TRUST)})`}`);
   if (ALLOWED_ORIGIN === '*' && APP_URL.startsWith('https:')) {
     console.log(`Tip: set ALLOWED_ORIGIN=${new URL(APP_URL).origin} in the .env file, so other websites cannot use this server from their pages.`);

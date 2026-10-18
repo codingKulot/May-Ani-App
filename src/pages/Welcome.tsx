@@ -1,18 +1,30 @@
 import { useState } from 'react';
 import { LuSprout } from 'react-icons/lu';
 import { navigate } from '@/core/router';
-import { createProfile } from '@/core/actions';
-import { startupProblem } from '@/core/store';
-import { DEFAULT_PLACE } from '@/data/places';
-import type { GeoPlace } from '@/types';
-import { Button, Field } from '@/components/ui';
-import { PlaceSelect } from '@/components/widgets';
+import { startupProblem, useAppState } from '@/core/store';
+import { hasUserData } from '@/core/actions';
+import { Alert, Button } from '@/components/ui';
 import { AccountsNotice, LogInForm, SignUpForm } from '@/components/AuthForms';
 
+/**
+ * The first screen, and the only one without a login: May-Ani is for logged-in users only (no guest mode since
+ * 18 October 2026), so chat partners and buyers are always real, named accounts.
+ * A phone that still has a profile without an account (a guest from before, or a login that ended) keeps its farm data:
+ * creating an account or logging in saves that data to the account.
+ */
 export function Welcome() {
-  const [mode, setMode] = useState<'splash' | 'signup' | 'login' | 'guest'>('splash');
-  const [place, setPlace] = useState<GeoPlace>(DEFAULT_PLACE);
+  const s = useAppState();
+  const [mode, setMode] = useState<'splash' | 'signup' | 'login'>(s.profile ? 'login' : 'splash');
   const home = () => navigate('/');
+  const leftover = s.profile && !s.profile.account ? s.profile : null;
+  const keepsData = hasUserData(s);
+
+  const notice = leftover ? (
+    <Alert tone="blue" title="Please log in to continue">
+      May-Ani is now for registered users only, so everyone you meet in the app is a real person with an account.
+      {keepsData ? ' Your farms, plans and records on this phone are kept and will be saved to your account.' : ''}
+    </Alert>
+  ) : null;
 
   if (mode === 'splash') {
     return (
@@ -29,28 +41,11 @@ export function Welcome() {
           </div>
           {startupProblem ? <div className="alert orange" role="alert" style={{ marginTop: 14, textAlign: 'left' }}><div className="grow small">{startupProblem}</div></div> : null}
           <div className="splash-actions">
-            <Button block onClick={() => setMode('signup')}>Get Started</Button>
+            <Button block onClick={() => setMode('signup')}>Create an account</Button>
             <Button block variant="secondary" onClick={() => setMode('login')}>Log in</Button>
-            <button className="btn ghost" onClick={() => setMode('guest')}>Continue as Guest</button>
           </div>
-          <p className="tiny muted" style={{ marginTop: 14 }}>With an account, your farms and records are saved on the May-Ani server too: log in on any phone to get them back.</p>
+          <p className="tiny muted" style={{ marginTop: 14 }}>An account keeps your farms and records safe on the May-Ani server: log in on any phone to get them back.</p>
         </div>
-      </div>
-    );
-  }
-
-  if (mode === 'guest') {
-    return (
-      <div className="splash">
-        <form className="splash-card card stack" style={{ textAlign: 'left' }} onSubmit={(e) => { e.preventDefault(); createProfile('Guest', place, 'farmer', true); home(); }}>
-          <div className="row" style={{ color: 'var(--green-900)' }}><LuSprout size={30} /><h1>Where is your farm?</h1></div>
-          <p className="muted small">We use your location for weather, hazards and prices. You can change it any time in Settings, and create an account there later.</p>
-          <Field label="Where is your farm (or where will it be)?" htmlFor="place">
-            <PlaceSelect id="place" value={place} onChange={setPlace} />
-          </Field>
-          <Button type="submit" block>Continue</Button>
-          <button type="button" className="btn ghost" onClick={() => setMode('splash')}>Back</button>
-        </form>
       </div>
     );
   }
@@ -60,16 +55,18 @@ export function Welcome() {
     <div className="splash">
       <div className="splash-card card stack" style={{ textAlign: 'left' }}>
         <div className="row" style={{ color: 'var(--green-900)' }}><LuSprout size={30} /><h1>{signup ? 'Create your account' : 'Welcome back'}</h1></div>
+        {notice}
         <p className="muted small">
           {signup
             ? 'It takes a minute and personalizes your weather, permits and prices. Log in with the same email on any phone.'
             : 'Log in with the email and password you used when you made your account.'}
         </p>
-        <AccountsNotice onGuest={() => setMode('guest')} />
+        <AccountsNotice />
         {signup
-          ? <SignUpForm onDone={home} onSwitch={() => setMode('login')} />
+          ? <SignUpForm onDone={home} onSwitch={() => setMode('login')}
+            initial={leftover ? { name: leftover.name === 'Guest' ? '' : leftover.name, place: leftover.location, role: leftover.role } : undefined} />
           : <LogInForm onDone={home} onSwitch={() => setMode('signup')} />}
-        <button type="button" className="btn ghost" onClick={() => setMode('splash')}>Back</button>
+        {leftover ? null : <button type="button" className="btn ghost" onClick={() => setMode('splash')}>Back</button>}
       </div>
     </div>
   );

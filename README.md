@@ -22,7 +22,12 @@ bun test && bun run typecheck
 ANTHROPIC_API_KEY=sk-ant-... bun run server     # optional: ANTHROPIC_MODEL, PORT
 ```
 The key stays on the server and is never sent to the browser. In the app: Settings → May-Ani server address
-(blank when the server also serves the app). Without the server, health uses the built-in symptom guide and chat shows labelled sample contacts.
+(blank when the server also serves the app). Without the server, health uses the built-in symptom guide and chat shows your earlier
+conversations, read-only, until the connection is back.
+
+**May-Ani is for logged-in users only** (no guest mode since 18 October 2026), so everyone people meet in the app is a real,
+named account. The server therefore needs accounts (MongoDB, see "Turning on accounts"). A phone that still has a guest
+profile from before is asked to create an account or log in; its farms, plans and records are kept and saved to the account.
 
 ## What is real and what is not
 
@@ -35,7 +40,7 @@ The key stays on the server and is never sent to the browser. In the app: Settin
 | Market prices | **No free live PH price API exists.** Bundled reference estimates are labelled "not live"; plug in a feed or enter local prices. |
 | Health | Offline symptom matcher; with the server, Claude vision analysis of the whole photo (description optional), which turns away photos that are not farm-related. No drug doses by design; reportable diseases flagged. |
 | Permits | Starter checklist; always confirm with LGU/BPLO, DA, BFAR. |
-| Chat | Server mode (token-authed, SSE) or sample contacts. Demo-grade auth; replace before public launch. |
+| Chat | Logged-in accounts only: every call carries the account login, the live stream uses a one-time ticket. Unread counts and new-message alerts. No block/report yet. |
 | Accounts | Sign up / log in with email and password, stored in MongoDB (`server/auth.mjs`). Passwords hashed with scrypt; only token hashes stored. Profile (name, role, location) is in the account, and so are farms, plans and records (synced, see "Your farm data follows your account"); photos stay on the device. "Forgot your password?" sends a one-time reset link by email (Gmail, see below). |
 
 ### Market feed format
@@ -57,7 +62,7 @@ Item ids are in `src/data/catalog.ts`.
 ## Turning on accounts (Sign up and Log in, MongoDB)
 
 Accounts live in a MongoDB database that the May-Ani server talks to. The app never talks to the database directly.
-Without a database the app still works: people use "Continue as Guest" and the sign-up screen explains why accounts are off.
+Without a database nobody can log in, so the app cannot be used: the log-in screen and the server log say that accounts are off.
 
 **Option A: MongoDB Atlas (free, in the cloud, recommended)**
 1. Go to https://www.mongodb.com/cloud/atlas/register and create an account (free tier, "M0").
@@ -133,7 +138,7 @@ Nothing to switch on: it works as soon as accounts work (see above).
 - **Two phones changed the same thing** (for example the same farm's name): the later change wins. Each farm, task, expense and
   so on is handled on its own, so changes to different things never overwrite each other. Something deleted on one phone is deleted
   on the others.
-- **Logging in on a phone that already has its own data** (for example after using guest mode) while the account also has data:
+- **Logging in on a phone that already has its own data** (for example an old guest profile, or data made before logging out) while the account also has data:
   the app asks **Keep both** (recommended: everything is combined) or **Use only my account's data** (this phone's extra items are removed).
   For anything that is on both, the account's copy is used.
 - **Log out** first saves what is waiting; if there is no internet it warns you. **Delete all my data** empties only this phone: the
@@ -160,21 +165,19 @@ Tests: `tests/sync.test.ts` uses its own throwaway MongoDB and never touches you
 ## Putting May-Ani online safely
 
 **Daily AI allowance (your money).** Every AI photo check and every AI picture costs money on your Anthropic / Gemini /
-OpenAI account. Once the server is on the internet, anyone can use it, so each day:
+OpenAI account. Only logged-in users can use AI, and each day:
 
-| | Guest (per phone) | Guests on one internet address | Account | Whole server |
-|---|---|---|---|---|
-| AI checks (health photos, site photos) | `AI_DAILY_GUEST` = 5 | `AI_DAILY_GUEST_PER_IP` = 30 | `AI_DAILY_ACCOUNT` = 20 | `AI_DAILY_TOTAL` = 300 |
-| AI pictures (Layout ideas) | `PICTURES_DAILY_GUEST` = 3 | `PICTURES_DAILY_GUEST_PER_IP` = 15 | `PICTURES_DAILY_ACCOUNT` = 9 | `PICTURES_DAILY_TOTAL` = 60 |
+| | Per account | Whole server |
+|---|---|---|
+| AI checks (health photos, site photos) | `AI_DAILY_ACCOUNT` = 20 | `AI_DAILY_TOTAL` = 300 |
+| AI pictures (Layout ideas) | `PICTURES_DAILY_ACCOUNT` = 9 | `PICTURES_DAILY_TOTAL` = 60 |
 
-- Change any number in `.env`; `0` means none (for example `AI_DAILY_GUEST=0` makes AI need an account). Set the totals to
+- Change any number in `.env`; `0` means none. Set the totals to
   what you are willing to pay per day, and also set a monthly spending limit in each provider's console.
 - Counts start again at midnight, Philippine time, and also when the server restarts (they are kept in memory).
-- Guests are counted per phone (the app makes a random phone id) because many phones on Globe/Smart mobile data share one
-  internet address; that address gets a bigger guest total so one person cannot get endless checks by faking new phones.
 - A check that cost nothing (no AI credit, AI unreachable or busy) does not count. The Health page shows the allowance and,
-  when it runs out, says so (with "Create a free account" for guests).
-- The server's first lines show the limits: `Daily limits: AI checks 5 per guest phone, 20 per account, 300 in total; ...`
+  when it runs out, says so.
+- The server's first lines show the limits: `Daily limits: AI checks 20 per account, 300 in total; ...`
 
 **Behind a proxy (`TRUST_PROXY`).** If people reach the server through Cloudflare Tunnel, Caddy, nginx or a hosting platform,
 every request seems to come from that proxy, so all users would share one rate limit and one daily allowance. Set:
@@ -193,7 +196,9 @@ OpenStreetMap tiles, and any https market feed or server address set in Settings
 
 **Checking the built app without your real keys or database:** `bun run build`, then start the "server-safe" preview
 (or run `bun --env-file=scripts/safe.env server/index.mjs`) and open http://localhost:8790. Everything paid, email and MongoDB
-are switched off there.
+are switched off there. As May-Ani needs a login, that server shows only the log-in screen. To try logging in, sync and chat
+without your Atlas data, run `bun scripts/test-db.ts` (a throwaway database, gone when you press Ctrl+C) and start the
+"server-test-db" preview (or `bun --env-file=scripts/test-db.env server/index.mjs`), then open http://localhost:8791.
 
 ## Roadmap
 Filipino/Cebuano UI, hogs & ASF module, official PHIVOLCS GIS layers, syncing photos to the account, DA Bantay Presyo ETL,

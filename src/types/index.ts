@@ -19,10 +19,13 @@ export interface Profile {
   id: string;
   name: string;
   location: GeoPlace;
-  guest: boolean;
   role: 'farmer' | 'supplier' | 'buyer' | 'expert';
   createdAt: string;
-  /** Set when this profile is linked to an online account (MongoDB on the May-Ani server). The login token is kept separately, never in the app state. */
+  /**
+   * The online account (MongoDB on the May-Ani server). May-Ani is for logged-in users only: without it (a guest profile from
+   * before 18 October 2026, or a login that ended) the app shows the log-in screen; the farm data on the phone is kept.
+   * The login token is kept separately, never in the app state.
+   */
   account?: { id: string; email: string };
 }
 

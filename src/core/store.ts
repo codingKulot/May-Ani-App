@@ -145,7 +145,7 @@ export function useSaveProblem(): string {
 
 /**
  * Asks the browser not to clear May-Ani's data when space runs low (Chrome decides by itself, without asking the user).
- * Without it, a browser may delete a website's data; for a guest that is their only copy.
+ * Without it, a browser may delete a website's data; photos and changes not yet saved to the account exist only here.
  */
 export async function askToKeepData() {
   try {

@@ -8,7 +8,7 @@ import { placeLabel } from '@/data/places';
 import { ApiError, serverStatus, type ServerStatus } from '@/services/ai';
 import { clearSession, saveAccountProfile } from '@/services/auth';
 import type { Profile } from '@/types';
-import { Alert, Badge, Button, Card, Chips, Field, LinkButton, PageHeader, askConfirm, toast } from '@/components/ui';
+import { Alert, Badge, Button, Card, Chips, Field, PageHeader, askConfirm, toast } from '@/components/ui';
 import { PlaceSelect } from '@/components/widgets';
 import { LogOutButton } from '@/components/AuthForms';
 import { SyncStatusPanel } from '@/components/SyncStatus';
@@ -52,21 +52,11 @@ export function Settings() {
       <PageHeader title="Settings" />
       <div className="stack">
         <Card title="Account">
-          {p.account ? (
-            <div className="stack sm">
-              <p className="small">Logged in as <strong>{p.account.email}</strong>. Changes to your name, role and location below are saved to your account.</p>
-              <SyncStatusPanel />
-              <div className="row wrap"><LogOutButton /></div>
-            </div>
-          ) : (
-            <div className="stack sm">
-              <p className="small">{p.guest ? 'You are using May-Ani as a guest.' : 'You are not logged in.'} Create an account so your farms, plans and records are saved online and come back when you log in on another phone. Everything on this phone is kept.</p>
-              <div className="row wrap">
-                <LinkButton to="/account?mode=signup">Create account</LinkButton>
-                <LinkButton to="/account?mode=login" variant="secondary">Log in</LinkButton>
-              </div>
-            </div>
-          )}
+          <div className="stack sm">
+            <p className="small">Logged in as <strong>{p.account?.email}</strong>. Changes to your name, role and location below are saved to your account.</p>
+            <SyncStatusPanel />
+            <div className="row wrap"><LogOutButton /></div>
+          </div>
         </Card>
 
         <Card title="Profile">
@@ -96,9 +86,7 @@ export function Settings() {
 
         <Card title="Your data">
           <div className="stack sm">
-            <p className="small muted">{p.account
-              ? 'Your farms, plans and records are on this device and saved to your account. A backup file is an extra copy you keep yourself (photos are not in it).'
-              : 'Your farms, plans and records are stored on this device only. Download a backup before changing phones, or create an account.'}</p>
+            <p className="small muted">Your farms, plans and records are on this device and saved to your account. A backup file is an extra copy you keep yourself (photos are not in it).</p>
             {hasData ? null : <p className="small muted">Nothing to back up or delete yet. Add a farm, plan or record first. You can still restore a backup file.</p>}
             {damaged ? (
               <Alert tone="orange" title="Older data that could not be read" action={
@@ -127,10 +115,8 @@ export function Settings() {
             </div>
             <Button variant="danger" disabled={!hasData} onClick={async () => {
               if (!(await askConfirm({
-                title: p.account ? 'Delete all data on this phone and log out?' : 'Delete all data on this phone?',
-                message: p.account
-                  ? 'This cannot be undone on this phone. Your online account and the farm data saved in it are not deleted: log in again to get them back.'
-                  : 'Your farms, plans and records are only on this phone, so they will be gone for good. Download a backup first if you may need them.',
+                title: 'Delete all data on this phone and log out?',
+                message: 'This cannot be undone on this phone. Your online account and the farm data saved in it are not deleted: log in again to get them back.',
                 ok: 'Delete everything', danger: true,
               }))) return;
               wipeAllData(); location.hash = '#/welcome';

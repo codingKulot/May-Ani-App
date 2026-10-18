@@ -6,11 +6,11 @@ import { navigate } from '@/core/router';
 import { allItems } from '@/data/catalog';
 import { placeLabel } from '@/data/places';
 import { HEALTH_DISCLAIMER, diagnoseOffline, readAiCheck, type AiVerdict } from '@/services/health';
-import { aiDiagnose, aiProblem, serverStatus, type DailyAllowance, type ServerStatus } from '@/services/ai';
+import { aiDiagnose, aiProblem, serverStatus, type ServerStatus } from '@/services/ai';
 import { fileToImagePayload, type ImagePayload } from '@/lib/image';
 import { prettyDate } from '@/lib/format';
 import type { DiagnosisResult, HealthKind } from '@/types';
-import { Alert, Badge, Button, Card, Chips, Empty, Field, LinkButton, PageHeader, Progress, Spinner, Tabs, toast } from '@/components/ui';
+import { Alert, Badge, Button, Card, Chips, Empty, Field, PageHeader, Progress, Spinner, Tabs, toast } from '@/components/ui';
 
 const KINDS: { id: HealthKind; label: string }[] = [
   { id: 'plant', label: 'Plant' },
@@ -36,16 +36,13 @@ const failTitle = (code: string, photo: boolean) => {
     ai_busy: 'The AI service is busy',
     ai_refused: 'The AI did not answer',
     ai_quota: "Today's AI checks are used up",
+    login: 'Please log in again',
+    accounts_off: 'Accounts are not set up on the server',
+    accounts_down: 'The account database cannot be reached',
     ai_daily_cap: 'The AI has reached its limit for today',
   } as Record<string, string>)[code] ?? 'The AI check did not work';
 };
 
-/** "Free AI checks: 5 a day on this phone, 20 with an account." (the server's numbers) */
-function allowanceLine(a: DailyAllowance, hasAccount: boolean): string {
-  if (hasAccount && a.account !== undefined) return `AI checks: ${a.account} a day with your account.`;
-  if (a.guest === 0) return 'AI checks need an account on this server.';
-  return `Free AI checks: ${a.guest} a day on this phone${a.account !== undefined ? `, ${a.account} with a free account` : ''}.`;
-}
 
 /** What the last "Analyze" produced. `verdict` is missing when the answer came from the offline symptom guide only. */
 interface Outcome {
@@ -250,7 +247,7 @@ export function Health() {
             <Button block disabled={!canRun || busy} onClick={run}>
               {busy ? <><Spinner /> {usePhoto ? 'Checking the whole photo…' : 'Analyzing…'}</> : <><LuSparkles size={18} /> Analyze{aiOn ? ' with AI' : ''}</>}
             </Button>
-            {aiOn && server?.daily ? <p className="tiny muted">{allowanceLine(server.daily.ai, !!s.profile?.account)}</p> : null}
+            {aiOn && server?.daily ? <p className="tiny muted">AI checks: {server.daily.ai} a day with your account.</p> : null}
             {mode === 'describe' && server !== undefined && !aiOn ? (
               <p className="tiny muted">{server === null ? 'AI server not connected' : 'AI is not set up on the server'}: results come from the built-in symptom guide (works offline).</p>
             ) : null}
@@ -261,8 +258,7 @@ export function Health() {
         {outcome ? (
           <div className="stack">
             {outcome.aiFail ? (
-              <Alert tone="orange" title={failTitle(outcome.aiFail.code, outcome.photo)} action={outcome.aiFail.code === 'ai_quota' && !s.profile?.account && server?.accounts
-                ? <div style={{ marginTop: 8 }}><LinkButton to="/account?mode=signup" size="sm" variant="secondary">Create a free account</LinkButton></div> : undefined}>
+              <Alert tone="orange" title={failTitle(outcome.aiFail.code, outcome.photo)}>
                 {outcome.aiFail.text}{' '}
                 {outcome.described
                   ? 'The results below come from the built-in symptom guide, based on your description.'

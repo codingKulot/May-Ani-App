@@ -20,10 +20,11 @@ import { Permits } from '@/pages/Permits';
 import { Community } from '@/pages/Community';
 import { Learn } from '@/pages/Learn';
 import { Settings } from '@/pages/Settings';
-import { Account } from '@/pages/Account';
 import { ResetPassword } from '@/pages/ResetPassword';
 import { ConfirmHost, Empty, LinkButton, ToastHost, toast } from '@/components/ui';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
+
+const LOGIN_ENDED = 'Your login has ended. Log in again: your farm data is still on this phone.';
 
 /**
  * Route table. To add a page: write it in src/pages, add one line here and one NAV entry in core/nav.ts.
@@ -43,7 +44,6 @@ const routes: RouteDef[] = [
   { pattern: '/community', render: () => <Community /> },
   { pattern: '/learn', render: () => <Learn /> },
   { pattern: '/settings', render: () => <Settings /> },
-  { pattern: '/account', render: (m) => <Account key={m.query.mode ?? ''} mode={m.query.mode} /> },
 ];
 
 export function registerRoutes(extra: RouteDef[]) {
@@ -54,27 +54,30 @@ export function App() {
   const state = useAppState();
   const { profile } = state;
   const { path, query } = useHash();
+  // May-Ani is for logged-in users only (no guest mode since 18 October 2026). Without an account link (a guest profile from
+  // before, or a login that ended) the log-in screen shows; the farm data on this phone is kept and goes into the account.
+  const loggedIn = !!profile?.account;
 
   useEffect(() => {
-    if (!profile && path !== '/welcome' && path !== '/reset') navigate('/welcome');
-    if (profile && path === '/welcome') navigate('/');
-  }, [profile, path]);
+    if (!loggedIn && path !== '/welcome' && path !== '/reset') navigate('/welcome');
+    if (loggedIn && path === '/welcome') navigate('/');
+  }, [loggedIn, path]);
 
-  // Once per app start: if the server no longer accepts this login (expired, logged out elsewhere), drop the account link.
-  // Offline or no server: keep it as it is (the app works without the server).
+  // Once per app start: if the server no longer accepts this login (expired, logged out elsewhere), ask for a new log-in.
+  // Offline or no server: keep it as it is, so a logged-in farmer can keep working without signal.
   useEffect(() => {
     if (!getState().profile?.account) return;
     checkSession().then((r) => {
       if (r !== 'expired') return;
       clearSession();
       unlinkAccount();
-      toast('Your login has ended. Your data is still here. Log in again in Settings.');
+      toast(LOGIN_ENDED);
     });
   }, []);
 
   // Farm data follows the account: saves changes and brings in other phones' changes (services/sync).
   useEffect(() => {
-    startSync({ onLoginEnded: () => toast('Your login has ended. Your data is still here. Log in again in Settings.') });
+    startSync({ onLoginEnded: () => toast(LOGIN_ENDED) });
   }, []);
 
   // Once someone uses the app, ask the browser not to clear its data when space runs low.
@@ -84,7 +87,7 @@ export function App() {
 
   // Chat stays connected on every page (for phones that joined it), and starts over when someone logs in or out here.
   useEffect(() => {
-    if (profile) void startChat();
+    if (loggedIn) void startChat();
     else stopChat();
   }, [profile?.id, profile?.account?.id]);
 
@@ -101,7 +104,7 @@ export function App() {
 
   // The link in a "reset your password" email: works on any phone, with or without a profile, outside the usual menus.
   const screen = path === '/reset' ? <ResetPassword token={query.token} />
-    : !profile ? <Welcome />
+    : !loggedIn ? <Welcome />
       : (
         <Shell>
           {/* A crash in one page keeps the menu usable; opening another page (a new path) tries again. */}

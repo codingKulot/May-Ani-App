@@ -52,8 +52,8 @@ export function Shell({ children, title }: { children: ReactNode; title?: string
         <div className="me">
           <Avatar name={profile?.name ?? '?'} />
           <div>
-            {profile?.name ?? 'Guest'}
-            <small>{profile?.account ? profile.account.email : profile?.guest ? 'Guest mode' : 'Not logged in'}</small>
+            {profile?.name}
+            <small>{profile?.account?.email}</small>
           </div>
         </div>
       </aside>

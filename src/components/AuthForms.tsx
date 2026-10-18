@@ -13,7 +13,7 @@ import { flushSync, forgetSync, prepareLink, syncNow } from '@/services/sync';
 import { Alert, Button, Chips, Field, Spinner, askConfirm } from '@/components/ui';
 import { PlaceSelect } from '@/components/widgets';
 
-/** Sign-up and log-in forms, used by the Welcome screen (no profile yet) and the Account page (guest or local profile). */
+/** Sign-up and log-in forms, used by the Welcome screen (May-Ani is for logged-in users only). */
 
 const ROLE_ITEMS: { id: Profile['role']; label: string }[] = [
   { id: 'farmer', label: 'Farmer' }, { id: 'supplier', label: 'Supplier' }, { id: 'buyer', label: 'Buyer' }, { id: 'expert', label: 'Expert' },
@@ -110,21 +110,17 @@ function LinkChoice({ q, onDone }: { q: LinkQuestion; onDone: () => void }) {
 }
 
 /** Warns before the user types everything in, when the server cannot make accounts right now. */
-export function AccountsNotice({ onGuest }: { onGuest?: () => void }) {
+export function AccountsNotice() {
   const [state, setState] = useState<'checking' | 'ok' | 'no-server' | 'off'>('checking');
   useEffect(() => {
     serverStatus(true).then((s) => setState(!s ? 'no-server' : s.accounts ? 'ok' : 'off'));
   }, []);
   if (state === 'checking' || state === 'ok') return null;
   return (
-    <Alert
-      tone="orange"
-      title={state === 'no-server' ? 'Cannot reach the May-Ani server' : 'Accounts are not switched on yet'}
-      action={onGuest ? <Button size="sm" variant="secondary" onClick={onGuest}>Continue as Guest</Button> : undefined}
-    >
+    <Alert tone="orange" title={state === 'no-server' ? 'Cannot reach the May-Ani server' : 'Accounts are not switched on yet'}>
       {state === 'no-server'
-        ? 'Creating an account and logging in need the May-Ani server and an internet connection. You can use the app as a guest and create your account later in Settings.'
-        : 'This server has no database connected yet, so it cannot save accounts. You can use the app as a guest and create your account later in Settings.'}
+        ? 'Creating an account and logging in need the May-Ani server and an internet connection. Check your internet and try again.'
+        : 'This server has no database connected yet, so it cannot save accounts. The server owner needs to add MONGODB_URI to the .env file.'}
     </Alert>
   );
 }

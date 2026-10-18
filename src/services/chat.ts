@@ -2,45 +2,16 @@ import { useSyncExternalStore } from 'react';
 import { getState, setState, uid } from '@/core/store';
 import type { AppState, ChatContact, ChatMessage } from '@/types';
 import { ApiError, chatApi, serverStatus, type DirectoryUser, type ServerMessage } from './ai';
-import { sessionToken } from './auth';
 
 /**
- * Chat works in two modes:
- *  - server: real users via server/index.mjs (register -> directory -> SSE stream). A logged-in user's chat identity is the
- *    account's ("acct-<id>", the same on every phone, from the server); a guest's is this phone's profile id.
- *  - local:  clearly-labelled SAMPLE contacts so the UI is usable offline / before a server exists
- * Once this phone has joined (opened Community with a server), the connection stays open on every page, so new messages show
- * as unread counts, a short notice and, when allowed, a phone notification (App.tsx). Phones that never opened Community do
- * not connect, so nobody is listed in the directory without choosing to chat.
+ * Chat between logged-in May-Ani users (server/index.mjs /api/chat/*). Everyone in it is a real account ("acct-<id>", the same
+ * on every phone, with the account's name); every call carries the login, and there are no guests or sample contacts.
+ * Without the server (no signal), the conversations already on this phone stay readable and sending waits for the connection.
+ * Once this phone has joined (opened Community), the connection stays open on every page, so new messages show as unread
+ * counts, a short notice and, when allowed, a phone notification (App.tsx). Phones that never opened Community do not connect,
+ * so nobody is listed in the directory without choosing to chat.
  * The UI only talks to this module and the app state, so a different backend can replace it without UI changes.
  */
-
-export const SAMPLE_CONTACTS: ChatContact[] = [
-  { id: 'sample-greenfields', name: 'GreenFields Supplier', kind: 'business', blurb: 'Organic fertilizer & seedlings', sample: true },
-  { id: 'sample-tilapia', name: 'Tilapia Farmers PH', kind: 'group', blurb: 'Group - tilapia growers', sample: true },
-  { id: 'sample-agritech', name: 'AgriTech Experts', kind: 'business', blurb: 'Technical advice', sample: true },
-  { id: 'sample-rizal', name: 'Rizal Vegetable Growers', kind: 'group', blurb: 'Group - vegetable growers', sample: true },
-  { id: 'sample-buyers', name: 'Local Buyers - Nueva Ecija', kind: 'business', blurb: 'Buyers of fresh produce', sample: true },
-];
-
-const SAMPLE_MESSAGES: Omit<ChatMessage, 'id' | 'at'>[] = [
-  { contactId: 'sample-greenfields', from: 'them', text: 'Hi! We have available organic fertilizer. Want a quote?' },
-  { contactId: 'sample-tilapia', from: 'them', text: 'Isang tanong lang po tungkol sa feeding schedule...' },
-  { contactId: 'sample-agritech', from: 'them', text: 'Welcome! Send a photo of your problem and we will take a look.' },
-  { contactId: 'sample-rizal', from: 'them', text: 'Magkano po ang current price ng kangkong?' },
-  { contactId: 'sample-buyers', from: 'them', text: 'Looking for fresh vegetables. PM me.' },
-];
-
-/** Sample contacts and their first messages, already read (they are examples, not news). */
-export function ensureSampleData() {
-  const s = getState();
-  if (s.contacts.length > 0) return;
-  const now = Date.now();
-  const chats = SAMPLE_MESSAGES.map((m, i) => ({ ...m, id: uid(), at: new Date(now - (i + 1) * 3_600_000 * 5).toISOString() }));
-  setState((st) => ({ ...st, contacts: SAMPLE_CONTACTS, chats, chatRead: { ...st.chatRead, ...Object.fromEntries(chats.map((m) => [m.contactId, m.at])) } }));
-}
-
-export const isSample = (contactId: string) => contactId.startsWith('sample-');
 
 export function addLocalMessage(contactId: string, from: 'me' | 'them', text: string, at = new Date().toISOString(), id = uid()) {
   setState((s) => (s.chats.some((m) => m.id === id) ? s : { ...s, chats: [...s.chats, { id, contactId, from, text, at }] }));
@@ -54,16 +25,20 @@ export const toLocal = (m: ServerMessage, me: string): ChatMessage =>
   ({ id: m.id, contactId: m.from === me ? m.to : m.from, from: m.from === me ? 'me' : 'them', text: m.text, at: m.at });
 
 // ------------------------------------------------------------------ unread
-/** Unread messages per conversation: messages from them that are newer than the newest one read on this phone. */
-export function unreadCounts(s: Pick<AppState, 'chats' | 'chatRead'>): Map<string, number> {
+/**
+ * Unread messages per conversation: messages from them that are newer than the newest one read on this phone.
+ * Only people in the contact list count, so a message from someone no longer in the chat never shows a count nobody can clear.
+ */
+export function unreadCounts(s: Pick<AppState, 'chats' | 'chatRead' | 'contacts'>): Map<string, number> {
+  const known = new Set(s.contacts.map((c) => c.id));
   const out = new Map<string, number>();
   for (const m of s.chats) {
-    if (m.from === 'them' && m.at > (s.chatRead[m.contactId] ?? '')) out.set(m.contactId, (out.get(m.contactId) ?? 0) + 1);
+    if (m.from === 'them' && known.has(m.contactId) && m.at > (s.chatRead[m.contactId] ?? '')) out.set(m.contactId, (out.get(m.contactId) ?? 0) + 1);
   }
   return out;
 }
 
-export function totalUnread(s: Pick<AppState, 'chats' | 'chatRead'>): number {
+export function totalUnread(s: Pick<AppState, 'chats' | 'chatRead' | 'contacts'>): number {
   let n = 0;
   for (const v of unreadCounts(s).values()) n += v;
   return n;
@@ -102,22 +77,28 @@ function announce(m: ChatMessage) {
 }
 
 // ------------------------------------------------------------------ connection
-export interface ChatStatus { mode: 'server' | 'local' | null; me: string | null }
+/**
+ * 'online' (connected to the chat), 'offline' (the server cannot be reached: earlier messages stay readable), 'off' (this server
+ * has no accounts, so no chat), or null while connecting. `me` is this user's chat id.
+ */
+export interface ChatStatus { mode: 'online' | 'offline' | 'off' | null; me: string | null }
 let status: ChatStatus = { mode: null, me: null };
 const statusListeners = new Set<() => void>();
 const setStatus = (s: ChatStatus) => { status = s; statusListeners.forEach((l) => l()); };
-/** 'server' (real people), 'local' (sample contacts), or null while connecting; `me` is this user's chat id on the server. */
 export function useChatStatus(): ChatStatus {
   return useSyncExternalStore((cb) => { statusListeners.add(cb); return () => { statusListeners.delete(cb); }; }, () => status);
 }
 
 let stream: EventSource | null = null;
+let retry: ReturnType<typeof setTimeout> | undefined;
+let retryMs = 3000;
 let connecting: Promise<void> | null = null;
 /** Who the connection is for: profile id + account id. Logging in or out on this phone starts a new connection. */
 let connectedFor = '';
-const whoKey = () => { const p = getState().profile; return p ? `${p.id}|${p.account?.id ?? ''}` : ''; };
+const whoKey = () => { const p = getState().profile; return p?.account ? `${p.id}|${p.account.id}` : ''; };
 
 export function stopChat() {
+  clearTimeout(retry);
   stream?.close();
   stream = null;
   connectedFor = '';
@@ -125,15 +106,15 @@ export function stopChat() {
 }
 
 /**
- * Opens the chat connection, once for the whole app. `join` = the user opened Community: it may list this phone in the
- * directory. Without it, only a phone that joined before connects (to watch for new messages on every page).
+ * Opens the chat connection, once for the whole app (logged-in users only). `join` = the user opened Community: it may list
+ * them in the directory. Without it, only a phone that joined before connects (to watch for new messages on every page).
  */
 export function startChat(join = false): Promise<void> {
   const k = whoKey();
   if (!k) { stopChat(); return Promise.resolve(); }
   if (connectedFor && connectedFor !== k) stopChat();
   if (connecting) return connecting;
-  if (status.mode === 'server' && connectedFor === k) return Promise.resolve();
+  if (status.mode === 'online' && connectedFor === k) return Promise.resolve();
   if (!join && !getState().chatJoined) return Promise.resolve();
   connectedFor = k;
   connecting = connect(k).finally(() => { connecting = null; });
@@ -141,32 +122,36 @@ export function startChat(join = false): Promise<void> {
 }
 
 async function connect(k: string) {
-  const profile = getState().profile!;
-  const server = await serverStatus();
-  if (!server?.chat) { ensureSampleData(); setStatus({ mode: 'local', me: null }); return; }
+  try { localStorage.removeItem('may-ani.chatToken'); } catch { /* the separate chat password of earlier versions */ }
+  const server = await serverStatus(true);
+  if (!server) { setStatus({ mode: 'offline', me: null }); return; }
+  if (!server.chat) { setStatus({ mode: 'off', me: null }); return; }
   try {
-    const { id: me } = await chatApi.register({
-      id: profile.id, name: profile.name, role: profile.role, blurb: `${profile.location.name}, ${profile.location.province}`,
-      session: profile.account ? sessionToken() || undefined : undefined,
-    });
-    const [{ users }, { messages }] = await Promise.all([chatApi.directory(), chatApi.history(me)]);
+    const profile = getState().profile!;
+    const me = await chatApi.register({ blurb: `${profile.location.name}, ${profile.location.province}` });
+    const [{ users }, { messages }] = await Promise.all([chatApi.directory(), chatApi.history()]);
     if (whoKey() !== k) return; // logged out or in while connecting
-    setState((s) => ({
-      ...s, chatJoined: true, contacts: toContacts(users, me),
-      chats: messages.filter((m) => m.from !== m.to).map((m) => toLocal(m, me)),
-    }));
-    openStream(me);
-    setStatus({ mode: 'server', me });
-  } catch {
-    ensureSampleData();
-    setStatus({ mode: 'local', me: null });
+    setState((s) => ({ ...s, chatJoined: true, contacts: toContacts(users, me), chats: messages.map((m) => toLocal(m, me)) }));
+    setStatus({ mode: 'online', me });
+    await openStream();
+  } catch (e) {
+    if (whoKey() !== k) return;
+    setStatus({ mode: e instanceof ApiError && e.code === 'accounts_off' ? 'off' : 'offline', me: null });
+    if (!(e instanceof ApiError && e.status === 401)) scheduleRetry(); // a login that ended is handled by App.tsx and sync
   }
 }
 
-function openStream(me: string) {
+/** Opens the live stream with a fresh one-time ticket. A drop is retried with a new ticket, waiting longer each time. */
+async function openStream() {
+  clearTimeout(retry);
   stream?.close();
-  let dropped = false;
-  const es = new EventSource(chatApi.streamUrl(me));
+  stream = null;
+  let url: string;
+  try { url = await chatApi.streamUrl(); } catch { scheduleRetry(); return; }
+  const me = status.me;
+  if (!me) return;
+  const es = new EventSource(url);
+  es.addEventListener('open', () => { retryMs = 3000; });
   es.addEventListener('message', async (ev) => {
     let m: ServerMessage;
     try { m = JSON.parse((ev as MessageEvent).data) as ServerMessage; } catch { return; /* ignore a malformed event */ }
@@ -176,10 +161,29 @@ function openStream(me: string) {
     if (!getState().contacts.some((c) => c.id === m.from)) await refresh(false);
     announce(toLocal(m, me));
   });
-  // The browser reconnects by itself after a drop (no internet, server restart); then fetch what arrived meanwhile.
-  es.addEventListener('error', () => { dropped = true; });
-  es.addEventListener('open', () => { if (dropped) { dropped = false; void refresh(true); } });
+  // A ticket works once, so the browser's own reconnect cannot succeed: close and start again with a new ticket.
+  es.addEventListener('error', () => {
+    es.close();
+    if (stream === es) { stream = null; scheduleRetry(); }
+  });
   stream = es;
+}
+
+function scheduleRetry() {
+  clearTimeout(retry);
+  if (!connectedFor) return;
+  retry = setTimeout(async () => {
+    if (!connectedFor) return;
+    if (status.mode === 'online') { await openStream(); void refresh(true); } else void reconnect();
+  }, retryMs);
+  retryMs = Math.min(retryMs * 2, 60_000);
+}
+
+async function reconnect() {
+  const k = connectedFor;
+  if (!k || connecting) return;
+  connecting = connect(k).finally(() => { connecting = null; });
+  await connecting;
 }
 
 /** Fetches the directory and the messages again; `announceNew` tells about the newest message that arrived meanwhile. */
@@ -187,38 +191,38 @@ async function refresh(announceNew: boolean) {
   const me = status.me;
   if (!me) return;
   try {
-    const [{ users }, { messages }] = await Promise.all([chatApi.directory(), chatApi.history(me)]);
+    const [{ users }, { messages }] = await Promise.all([chatApi.directory(), chatApi.history()]);
     if (status.me !== me) return;
     const known = new Set(getState().chats.map((c) => c.id));
-    const chats = messages.filter((m) => m.from !== m.to).map((m) => toLocal(m, me));
+    const chats = messages.map((m) => toLocal(m, me));
     setState((s) => ({ ...s, contacts: toContacts(users, me), chats }));
     const fresh = chats.filter((m) => m.from === 'them' && !known.has(m.id));
     if (announceNew && fresh.length) announce(fresh[fresh.length - 1]);
   } catch { /* still offline: the next reconnect tries again */ }
 }
 
-// A phone app in the background may lose the live connection: catch up when it comes back.
-if (typeof document !== 'undefined') {
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState !== 'visible' || status.mode !== 'server') return;
+// A phone app in the background may lose the live connection: catch up when it comes back, or when the internet returns.
+if (typeof window !== 'undefined') {
+  const catchUp = () => {
+    if (document.visibilityState !== 'visible' || !connectedFor) return;
     if (viewing) markRead(viewing);
-    if (!stream || stream.readyState === EventSource.CLOSED) { if (status.me) openStream(status.me); void refresh(true); }
-  });
+    if (status.mode === 'online' && !stream) { void openStream(); void refresh(true); }
+    else if (status.mode === 'offline') void reconnect();
+  };
+  document.addEventListener('visibilitychange', catchUp);
+  window.addEventListener('online', catchUp);
 }
 
 export async function sendMessage(contactId: string, text: string): Promise<void> {
   const clean = text.trim();
   if (!clean) return;
-  if (status.mode === 'server' && status.me && !isSample(contactId)) {
-    try {
-      const r = await chatApi.send({ from: status.me, to: contactId, text: clean });
-      addLocalMessage(contactId, 'me', clean, r.at, r.id);
-    } catch (e) {
-      if (e instanceof ApiError && e.status === 404) void refresh(false); // that person moved to their account: reload the list
-      throw e;
-    }
-  } else {
-    addLocalMessage(contactId, 'me', clean);
+  if (status.mode !== 'online') throw new Error('Chat is not connected. Check your internet and try again.');
+  try {
+    const r = await chatApi.send({ to: contactId, text: clean });
+    addLocalMessage(contactId, 'me', clean, r.at, r.id);
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 404) void refresh(false); // that person left the chat: reload the list
+    throw e;
   }
   markRead(contactId); // answering means everything before it was seen
 }

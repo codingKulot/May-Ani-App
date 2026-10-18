@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { aiDiagnose, aiProblem, ApiError, PHOTO_SUBJECTS, type AiCheck } from '@/services/ai';
 import { readAiCheck } from '@/services/health';
 import { setState } from '@/core/store';
-import { call, OFF, startServer } from './support/server';
+import { call, OFF, signUpUser, startMongo, startServer } from './support/server';
 
 /**
  * Plant / animal / fish photo check, end to end: the real server process talks to a FAKE Anthropic API on 127.0.0.1
@@ -39,15 +39,21 @@ const fake = Bun.serve({
     return answer();
   },
 });
+// AI is for logged-in users only: a throwaway MongoDB and one test account (never the owner's database).
+const mongo = await startMongo('health AI tests');
+const DB: Record<string, string> = mongo ? { MONGODB_URI: mongo.getUri(), MONGODB_DB: 'may_ani_health_ai_test' } : { MONGODB_URI: OFF };
 const srv = await startServer({
-  ANTHROPIC_API_KEY: KEY, ANTHROPIC_BASE_URL: `http://127.0.0.1:${fake.port}`, AI_TIMEOUT_MS: '1500', AI_RATE_PER_MIN: '1000', MONGODB_URI: OFF,
+  ANTHROPIC_API_KEY: KEY, ANTHROPIC_BASE_URL: `http://127.0.0.1:${fake.port}`, AI_TIMEOUT_MS: '1500', AI_RATE_PER_MIN: '1000', ...DB,
 });
-// the app's own client (src/services/ai.ts) talks to this server
+const login = mongo ? (await signUpUser(srv)).token : '';
+// the app's own client (src/services/ai.ts) talks to this server, logged in: its login token sits in the phone's storage
 setState((s) => ({ ...s, settings: { ...s.settings, apiBase: srv.url } }));
+const phone = new Map<string, string>([['may-ani.session.v1', login]]);
+(globalThis as any).localStorage = { getItem: (k: string) => phone.get(k) ?? null, setItem: (k: string, v: string) => phone.set(k, v), removeItem: (k: string) => phone.delete(k) };
 
-afterAll(() => { srv.stop(); fake.stop(true); });
+afterAll(async () => { srv.stop(); fake.stop(true); delete (globalThis as any).localStorage; await mongo?.stop(); });
 
-const diagnose = (body: Record<string, unknown>) => call(srv, 'POST', '/api/ai/diagnose', body);
+const diagnose = (body: Record<string, unknown>) => call(srv, 'POST', '/api/ai/diagnose', body, login);
 const lastSent = () => sent[sent.length - 1];
 
 const BANANA = {
@@ -99,7 +105,7 @@ describe('health photo check: app rules', () => {
 });
 
 // ------------------------------------------------------------------ server + fake Anthropic
-describe('health photo check: server', () => {
+describe.skipIf(!mongo)('health photo check: server', () => {
   test('a photo alone is enough, and the whole photo is sent as it came', async () => {
     answer = () => replyJson(BANANA);
     const r = await diagnose({ kind: 'plant', description: '', image: PHOTO });
@@ -203,7 +209,7 @@ describe('health photo check: server', () => {
   });
 });
 
-describe('health photo check: when the AI cannot answer', () => {
+describe.skipIf(!mongo)('health photo check: when the AI cannot answer', () => {
   test('no credit on the Anthropic account is a clear billing message, without provider details or the key', async () => {
     answer = () => apiError(400, 'invalid_request_error', 'Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits.');
     const r = await diagnose({ kind: 'plant', description: '', image: PHOTO });
@@ -249,9 +255,9 @@ describe('health photo check: when the AI cannot answer', () => {
   }, 10_000);
 
   test('the AI service cannot be reached', async () => {
-    const s = await startServer({ ANTHROPIC_API_KEY: KEY, ANTHROPIC_BASE_URL: 'http://127.0.0.1:9', MONGODB_URI: OFF });
+    const s = await startServer({ ANTHROPIC_API_KEY: KEY, ANTHROPIC_BASE_URL: 'http://127.0.0.1:9', ...DB });
     try {
-      const r = await call(s, 'POST', '/api/ai/diagnose', { kind: 'plant', description: '', image: PHOTO });
+      const r = await call(s, 'POST', '/api/ai/diagnose', { kind: 'plant', description: '', image: PHOTO }, login);
       expect(r.status).toBe(503);
       expect(r.body.code).toBe('ai_offline');
     } finally { s.stop(); }

@@ -4,6 +4,7 @@ import { request } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { MongoMemoryServer } from 'mongodb-memory-server';
 
 /**
  * Starts the real server (server/index.mjs) as its own process on a random port, for end-to-end tests.
@@ -16,10 +17,30 @@ export const OFF = ' ';
 
 export interface Srv { url: string; port: number; log: () => string; stop: () => void }
 
-/** Tests make many AI calls from one address: the daily allowance (server/limits.mjs) is set high unless a test sets its own. */
+/** Tests make many AI calls: the daily allowance (server/limits.mjs) is set high unless a test sets its own. */
 const NO_DAILY_LIMITS: Record<string, string> = Object.fromEntries(
-  ['AI', 'PICTURES'].flatMap((k) => ['GUEST', 'GUEST_PER_IP', 'ACCOUNT', 'TOTAL'].map((w) => [`${k}_DAILY_${w}`, '100000'])),
+  ['AI', 'PICTURES'].flatMap((k) => ['ACCOUNT', 'TOTAL'].map((w) => [`${k}_DAILY_${w}`, '100000'])),
 );
+
+/**
+ * A throwaway MongoDB (mongodb-memory-server runs the real mongod program) for tests that need logged-in users, or null with
+ * a warning when it cannot start on this PC (then those tests are skipped). It never touches the owner's database.
+ */
+export async function startMongo(label: string): Promise<MongoMemoryServer | null> {
+  return MongoMemoryServer.create().catch((e: Error) => {
+    console.warn(`\n[${label}] SKIPPED the tests that need a test database: it could not start (${e.message}).
+On Windows this usually means the Microsoft Visual C++ Redistributable (x64) is missing: https://aka.ms/vs/17/release/vc_redist.x64.exe\n`);
+    return null;
+  });
+}
+
+let users = 0;
+/** Signs up a new account on a test server; answers its login token and account id. */
+export async function signUpUser(srv: Srv, name = 'Juan Dela Cruz'): Promise<{ token: string; id: string }> {
+  const r = await call(srv, 'POST', '/api/auth/signup', { name, email: `user${++users}.${Date.now()}@example.com`, password: 'Tatlong kalabaw sa bukid' });
+  if (r.status !== 201) throw new Error(`Sign-up failed: ${r.status} ${JSON.stringify(r.body)}`);
+  return { token: r.body.token, id: r.body.user.id };
+}
 
 /** `dataDir`: a folder for the chat data file (data.json), when a test wants to look at it; otherwise a temporary one. */
 export async function startServer(env: Record<string, string>, dataDir?: string): Promise<Srv> {

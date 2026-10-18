@@ -18,6 +18,12 @@
       "runtimeExecutable": "bun",
       "runtimeArgs": ["--env-file=scripts/safe.env", "server/index.mjs"],
       "port": 8790
+    },
+    {
+      "name": "server-test-db",
+      "runtimeExecutable": "bun",
+      "runtimeArgs": ["--env-file=scripts/test-db.env", "server/index.mjs"],
+      "port": 8791
     }
   ]
 }

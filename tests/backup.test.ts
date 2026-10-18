@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
-import { createProfile, importData } from '@/core/actions';
+import { importData, signInWithAccount } from '@/core/actions';
 import { getState, resetState, setState } from '@/core/store';
 import { DEFAULT_PLACE } from '@/data/places';
 import { cleanBackup } from '@/services/sync/records';
@@ -43,7 +43,7 @@ describe('cleanBackup', () => {
 describe('importData', () => {
   beforeEach(() => {
     resetState();
-    createProfile('Juan', DEFAULT_PLACE, 'farmer', true);
+    signInWithAccount({ id: 'a1', email: 'juan@example.com', name: 'Juan', role: 'farmer', location: DEFAULT_PLACE, createdAt: '2026-10-18T00:00:00.000Z' });
     setState((s) => ({ ...s, settings: { ...s.settings, apiBase: 'http://192.168.1.20:8787' }, tasks: [task('mine')], farms: [farm('old')], activeFarmId: 'old' }));
   });
 
@@ -52,7 +52,7 @@ describe('importData', () => {
     const r = importData(JSON.stringify({
       farms: [farm('f1')], plans: [],
       settings: { apiBase: 'https://attacker.example', marketFeedUrl: '', units: 'metric' },
-      profile: { id: 'evil', name: 'Evil', location: DEFAULT_PLACE, guest: false, role: 'farmer', createdAt: '', account: { id: 'a', email: 'evil@example.test' } },
+      profile: { id: 'evil', name: 'Evil', location: DEFAULT_PLACE, role: 'farmer', createdAt: '', account: { id: 'a', email: 'evil@example.test' } },
     }));
     expect(r).toEqual({ ok: true, skipped: 0 });
     const after = getState();
