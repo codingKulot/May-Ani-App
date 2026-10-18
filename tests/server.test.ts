@@ -2,6 +2,8 @@ import { afterAll, describe, expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { call, sleep, startServer } from './support/server';
 
 /** Small server safety fixes from the October 2026 review: static files, broken addresses, chat data file, picture errors. */
@@ -47,6 +49,32 @@ describe('chat data file', () => {
       srv.stop();
     }
   });
+});
+
+describe('starting twice', () => {
+  test('a port that is already in use gets a plain explanation, not a crash report', async () => {
+    const busy = Bun.serve({ port: 0, hostname: '127.0.0.1', fetch: () => new Response('taken') });
+    const dir = mkdtempSync(join(tmpdir(), 'may-ani-port-'));
+    try {
+      const OFF = ' ';
+      const proc = spawn(process.execPath, ['server/index.mjs'], {
+        cwd: fileURLToPath(new URL('..', import.meta.url)),
+        env: { ...process.env, PORT: String(busy.port), DATA_FILE: join(dir, 'data.json'), ANTHROPIC_API_KEY: OFF, GEMINI_API_KEY: OFF, OPENAI_API_KEY: OFF, MONGODB_URI: OFF, SMTP_USER: OFF, SMTP_PASSWORD: OFF },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      let out = '';
+      proc.stdout.on('data', (d) => (out += d));
+      proc.stderr.on('data', (d) => (out += d));
+      for (let i = 0; i < 100 && proc.exitCode === null; i++) await sleep(100);
+      expect(proc.exitCode).toBe(1);
+      expect(out).toContain(`port ${busy.port} is already in use`);
+      expect(out).toContain('Ctrl+C');
+      expect(out).not.toContain('emitError'); // no stack trace
+    } finally {
+      busy.stop(true);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 20_000);
 });
 
 describe('picture errors', () => {

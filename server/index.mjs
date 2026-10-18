@@ -729,6 +729,18 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
+// Starting fails when the port is taken, almost always by May-Ani already running in another terminal: say so plainly.
+server.on('error', (e) => {
+  if (e.code === 'EADDRINUSE') {
+    console.error(`May-Ani cannot start: port ${PORT} is already in use. May-Ani (or another program) is probably already running there.
+  - If May-Ani is running in another terminal window, use that one, or stop it there with Ctrl+C and start it again.
+  - To run a second copy, give it another port, for example in PowerShell: $env:PORT=8788; bun server/index.mjs`);
+  } else {
+    console.error(`May-Ani cannot start: ${e.message}`);
+  }
+  process.exit(1);
+});
+
 server.listen(PORT, () => {
   console.log(`May-Ani server on http://localhost:${PORT}  |  AI: ${API_KEY ? `on (${MODEL})` : 'OFF - add ANTHROPIC_API_KEY to the .env file'}  |  pictures: ${imageProvider() ?? 'OFF - add GEMINI_API_KEY or OPENAI_API_KEY'}  |  chat: on  |  accounts: ${accounts ? 'on (MongoDB)' : accountsOff}  |  email: ${mailer ? `on (${mailer.host}), reset links open ${APP_URL}` : emailOff}`);
   const day = (k) => `${LIMITS[k].guest} per guest phone, ${LIMITS[k].account} per account, ${LIMITS[k].total} in total`;
