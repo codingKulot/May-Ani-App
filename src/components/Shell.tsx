@@ -3,7 +3,7 @@ import type { ReactNode } from 'react';
 import { LuEllipsis, LuSprout } from 'react-icons/lu';
 import { MORE_ITEMS, NAV, TABS, isActive } from '@/core/nav';
 import { Link, useHash } from '@/core/router';
-import { useAppState } from '@/core/store';
+import { useAppState, useSaveProblem } from '@/core/store';
 import { Avatar, Sheet, ToastHost } from './ui';
 
 export function Brand({ light }: { light?: boolean }) {
@@ -17,6 +17,7 @@ export function Brand({ light }: { light?: boolean }) {
 export function Shell({ children, title }: { children: ReactNode; title?: string }) {
   const { path } = useHash();
   const { profile } = useAppState();
+  const saveProblem = useSaveProblem();
   const [more, setMore] = useState(false);
   const [online, setOnline] = useState(typeof navigator === 'undefined' ? true : navigator.onLine);
 
@@ -52,6 +53,7 @@ export function Shell({ children, title }: { children: ReactNode; title?: string
       </aside>
 
       <div className="main">
+        {saveProblem ? <div className="offline not-saved" role="alert">{saveProblem}</div> : null}
         {!online ? <div className="offline" role="status">You're offline - your data is safe on this device. Weather, prices and AI need a connection.</div> : null}
         <header className="topbar mobile-only">
           <Brand />

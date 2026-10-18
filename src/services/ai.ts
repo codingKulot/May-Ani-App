@@ -2,6 +2,7 @@ import { getState } from '@/core/store';
 import type { DiagnosisResult, HealthKind, Sector, SiteConditions } from '@/types';
 import type { ImagePayload } from '@/lib/image';
 import { isValidQuad, type Quad } from '@/services/build/geometry';
+import { sessionToken } from './auth'; // auth.ts imports this file too; sessionToken is only read when a call is made, so that is fine
 
 /**
  * Client for the optional May-Ani server (server/index.mjs). The server holds the Anthropic API key,
@@ -16,6 +17,34 @@ export interface ServerStatus {
   model?: string;
   /** which image model is set up on the server for realistic pictures, if any */
   render?: 'gemini' | 'openai';
+  /** today's free uses: per guest phone, and per account when accounts are on */
+  daily?: { ai: DailyAllowance; pictures: DailyAllowance };
+}
+export interface DailyAllowance { guest: number; account?: number }
+
+const DEVICE_KEY = 'may-ani.device.v1';
+/**
+ * A random id for this phone, made once. The server counts a guest's free AI uses per phone with it (many phones can share one
+ * mobile-data internet address). It says nothing about the person and is never part of app data or backups.
+ */
+function deviceId(): string {
+  try {
+    let id = localStorage.getItem(DEVICE_KEY);
+    if (!id) {
+      id = typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `d-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+      localStorage.setItem(DEVICE_KEY, id);
+    }
+    return id;
+  } catch {
+    return '';
+  }
+}
+
+/** Headers for paid AI calls: the login (accounts get a bigger daily allowance) and this phone's id (for guests). */
+function paidHeaders(): Record<string, string> {
+  const token = sessionToken();
+  const device = deviceId();
+  return { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...(device ? { 'X-Device-Id': device } : {}) };
 }
 
 /**
@@ -99,7 +128,7 @@ export async function aiDiagnose(req: {
     image: req.image ? { mediaType: req.image.mediaType, data: req.image.data } : undefined,
   };
   const out = await call<{ subject?: string; seen?: string; results?: Omit<DiagnosisResult, 'source'>[] }>(
-    '/api/ai/diagnose', { method: 'POST', body: JSON.stringify(body) }, 100_000);
+    '/api/ai/diagnose', { method: 'POST', body: JSON.stringify(body), headers: paidHeaders() }, 100_000);
   return {
     subject: (PHOTO_SUBJECTS as readonly string[]).includes(out.subject ?? '') ? (out.subject as PhotoSubject) : undefined,
     seen: typeof out.seen === 'string' ? out.seen : '',
@@ -127,6 +156,7 @@ export async function aiSiteAnalysis(req: { sector: Sector; images: ImagePayload
       sector: req.sector,
       images: req.images.map((i) => ({ mediaType: i.mediaType, data: i.data })),
     }),
+    headers: paidHeaders(),
   });
 }
 
@@ -147,6 +177,7 @@ export async function aiSiteSurvey(image: ImagePayload): Promise<SiteSurvey> {
   const raw = await call<Omit<SiteSurvey, 'floorQuad'> & { floorQuad?: number[][] }>('/api/ai/survey', {
     method: 'POST',
     body: JSON.stringify({ image: { mediaType: image.mediaType, data: image.data } }),
+    headers: paidHeaders(),
   }, 90_000);
   const q = Array.isArray(raw.floorQuad) && raw.floorQuad.length === 4 ? (raw.floorQuad.map(([x, y]) => ({ x, y })) as Quad) : undefined;
   return { ...raw, floorQuad: isValidQuad(q) ? q : undefined, onSite: raw.onSite ?? [], reusable: raw.reusable ?? [], notes: raw.notes ?? [] };
@@ -157,6 +188,7 @@ export async function aiRenderPicture(image: ImagePayload, prompt: string): Prom
   const out = await call<{ image?: { mediaType: string; data: string } }>('/api/ai/render', {
     method: 'POST',
     body: JSON.stringify({ image: { mediaType: image.mediaType, data: image.data }, prompt }),
+    headers: paidHeaders(),
   }, 170_000);
   if (!out.image?.data) throw new Error('No picture came back. Please try again.');
   return `data:${out.image.mediaType};base64,${out.image.data}`;

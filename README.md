@@ -145,6 +145,56 @@ checks the login, the size and the shape of every save, and each account only ev
 
 Tests: `tests/sync.test.ts` uses its own throwaway MongoDB and never touches your database.
 
+## Keeping data safe on the phone
+
+- **Back up / Restore** (Settings > Your data): a backup file holds the farm data. Restoring brings back only farm data (farms, plans,
+  tasks, money records, harvests, health log, own items and a few choices), each item checked first. It never changes the phone's
+  profile, login or settings such as the server address, so a backup file someone shares cannot point the app at another server.
+  Damaged items in a file are left out, and the app says how many.
+- **If a page crashes**, it shows "Something went wrong on this page" with a way back and "Download a backup", instead of a blank screen.
+- **If the saved data cannot be read** at start-up, the app starts empty but keeps the old data aside; Settings > Your data can
+  download it. **If the phone is full**, a red banner says changes are NOT saved until there is space again.
+- Number boxes accept what people type, like `1,500` or `₱1,500.50`. Very large amounts (an extra zero?) ask before saving.
+- **Reports > Export CSV** opens correctly in Excel (₱ and ñ show properly), and text that a spreadsheet could run as a formula is made harmless.
+
+## Putting May-Ani online safely
+
+**Daily AI allowance (your money).** Every AI photo check and every AI picture costs money on your Anthropic / Gemini /
+OpenAI account. Once the server is on the internet, anyone can use it, so each day:
+
+| | Guest (per phone) | Guests on one internet address | Account | Whole server |
+|---|---|---|---|---|
+| AI checks (health photos, site photos) | `AI_DAILY_GUEST` = 5 | `AI_DAILY_GUEST_PER_IP` = 30 | `AI_DAILY_ACCOUNT` = 20 | `AI_DAILY_TOTAL` = 300 |
+| AI pictures (Layout ideas) | `PICTURES_DAILY_GUEST` = 3 | `PICTURES_DAILY_GUEST_PER_IP` = 15 | `PICTURES_DAILY_ACCOUNT` = 9 | `PICTURES_DAILY_TOTAL` = 60 |
+
+- Change any number in `.env`; `0` means none (for example `AI_DAILY_GUEST=0` makes AI need an account). Set the totals to
+  what you are willing to pay per day, and also set a monthly spending limit in each provider's console.
+- Counts start again at midnight, Philippine time, and also when the server restarts (they are kept in memory).
+- Guests are counted per phone (the app makes a random phone id) because many phones on Globe/Smart mobile data share one
+  internet address; that address gets a bigger guest total so one person cannot get endless checks by faking new phones.
+- A check that cost nothing (no AI credit, AI unreachable or busy) does not count. The Health page shows the allowance and,
+  when it runs out, says so (with "Create a free account" for guests).
+- The server's first lines show the limits: `Daily limits: AI checks 5 per guest phone, 20 per account, 300 in total; ...`
+
+**Behind a proxy (`TRUST_PROXY`).** If people reach the server through Cloudflare Tunnel, Caddy, nginx or a hosting platform,
+every request seems to come from that proxy, so all users would share one rate limit and one daily allowance. Set:
+- `TRUST_PROXY=loopback` when the proxy runs on the same computer (Cloudflare Tunnel, Caddy, nginx);
+- `TRUST_PROXY=1` (the number of proxies in front) on a hosting platform, but only if the server cannot be reached around the proxy;
+- or the proxy's own IP addresses, comma-separated. Leave it empty when people connect to the server directly (the default).
+
+**`ALLOWED_ORIGIN`.** Set it to your website address (for example `ALLOWED_ORIGIN=https://may-ani.example`) so other websites
+cannot use your server from their own pages. The server prints this tip when `APP_URL` is an https website. (It does not stop
+direct tools like curl: the daily allowance does that.)
+
+**Security headers.** Every answer tells the browser to run only May-Ani's own scripts, load pictures only from May-Ani, photos
+and OpenStreetMap, never show the app inside another website's frame, and not guess file types. With an `https` `APP_URL`, browsers
+are also told to always use https. Outside services the app may contact: Open-Meteo (weather, places), USGS (earthquakes),
+OpenStreetMap tiles, and any https market feed or server address set in Settings (a plain `http` feed is blocked on the built app).
+
+**Checking the built app without your real keys or database:** `bun run build`, then start the "server-safe" preview
+(or run `bun --env-file=scripts/safe.env server/index.mjs`) and open http://localhost:8790. Everything paid, email and MongoDB
+are switched off there.
+
 ## Roadmap
 Filipino/Cebuano UI, hogs & ASF module, official PHIVOLCS GIS layers, syncing photos to the account, DA Bantay Presyo ETL,
 SMS alerts for low-connectivity areas, payments/marketplace listings, cooperative accounts, push reminders.

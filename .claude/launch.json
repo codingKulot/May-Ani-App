@@ -12,6 +12,12 @@
       "runtimeExecutable": "bun",
       "runtimeArgs": ["run", "start"],
       "port": 8787
+    },
+    {
+      "name": "server-safe",
+      "runtimeExecutable": "bun",
+      "runtimeArgs": ["--env-file=scripts/safe.env", "server/index.mjs"],
+      "port": 8790
     }
   ]
 }

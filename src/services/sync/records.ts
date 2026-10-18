@@ -146,6 +146,30 @@ export function validRecord(r: unknown): r is WireRecord {
   return GUARDS[r.c as ListCollection](r.d);
 }
 
+/**
+ * The part of a backup file that is safe to restore: only the farm data that follows the account (never the profile,
+ * the login or settings such as the server address), each item checked like a record from the account, so a damaged or
+ * doctored file cannot crash a page or point the app at someone else's server. `skipped` counts the items left out.
+ */
+export function cleanBackup(file: Data): { patch: Partial<AppState>; skipped: number } {
+  const patch: Data = {};
+  let skipped = 0;
+  for (const c of LIST_COLLECTIONS) {
+    if (!Array.isArray(file[c])) continue;
+    const seen = new Set<string>();
+    patch[c] = file[c].filter((d: unknown) => {
+      const ok = isObj(d) && isStr(d.id) && ID_RE.test(d.id) && !seen.has(d.id) && GUARDS[c](d);
+      if (ok) seen.add(d.id); else skipped++;
+      return ok;
+    });
+  }
+  for (const p of PREF_IDS) {
+    if (!(p in file)) continue;
+    if (PREF_GUARDS[p](file[p])) patch[p] = file[p]; else skipped++;
+  }
+  return { patch: patch as Partial<AppState>, skipped };
+}
+
 /** Puts records from the account into the app state (pure). New items land where this phone would have put them. */
 export function applyRecords(s: AppState, recs: WireRecord[]): AppState {
   if (!recs.length) return s;

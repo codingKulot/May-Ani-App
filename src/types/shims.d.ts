@@ -28,6 +28,16 @@ declare module 'react' {
   ): T;
   export function useId(): string;
   export function createElement(type: any, props?: any, ...children: any[]): any;
+  /** Class components: only needed for error boundaries (components/ErrorBoundary.tsx). */
+  export class Component<P = {}, S = {}> {
+    constructor(props: P);
+    readonly props: Readonly<P>;
+    state: Readonly<S>;
+    setState(patch: Partial<S> | ((prev: S, props: P) => Partial<S> | null)): void;
+    forceUpdate(): void;
+    render(): ReactNode;
+  }
+  export type ErrorInfo = { componentStack?: string | null };
   export const StrictMode: any;
   export const Fragment: any;
   const React: any;
@@ -63,8 +73,12 @@ declare module 'bun:test' {
     (name: string, fn: () => void): void;
     skipIf(condition: boolean): (name: string, fn: () => void) => void;
   };
-  export function test(name: string, fn: () => void | Promise<void>, timeoutMs?: number): void;
+  export const test: {
+    (name: string, fn: () => void | Promise<void>, timeoutMs?: number): void;
+    skipIf(condition: boolean): (name: string, fn: () => void | Promise<void>, timeoutMs?: number) => void;
+  };
   export function expect(v: any): any;
+  export function beforeEach(fn: () => void): void;
   export function afterEach(fn: () => void): void;
   export function afterAll(fn: () => void | Promise<void>): void;
 }
@@ -72,6 +86,9 @@ declare module 'bun:test' {
 
 declare module 'node:fs' {
   export function readFileSync(path: string | URL, encoding: 'utf8'): string;
+  export function writeFileSync(path: string, data: string): void;
+  export function readdirSync(path: string): string[];
+  export function existsSync(path: string): boolean;
   export function mkdtempSync(prefix: string): string;
   export function rmSync(path: string, opts?: { recursive?: boolean; force?: boolean }): void;
 }

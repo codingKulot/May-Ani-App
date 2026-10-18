@@ -99,7 +99,7 @@ function AddFarm({ open, onClose }: { open: boolean; onClose: () => void }) {
           <Field label="What kind of farm?"><Chips value={f.sector} onChange={(sector) => set({ sector, lines: [] })} items={[{ id: 'crops', label: '🌱 Crops' }, { id: 'fish', label: '🐟 Fish' }, { id: 'livestock', label: '🐖 Livestock' }]} /></Field>
           <Field label={areaFieldLabel(f.sector)} htmlFor="fa" hint={err('area') ?? (f.unit === 'ha' && f.area > 0 ? `= ${toSqm(f.area, 'ha').toLocaleString()} sqm` : '1 hectare = 10,000 sqm')}>
             <div className="input-group">
-              <NumberInput id="fa" value={f.area} min={0} step={f.unit === 'ha' ? 0.01 : 1} onChange={(area) => set({ area })} placeholder="0" />
+              <NumberInput id="fa" value={f.area} min={0} onChange={(area) => set({ area })} placeholder="0" />
               <Chips seg value={f.unit} onChange={(unit) => set({ unit })} items={[{ id: 'sqm', label: 'sqm' }, { id: 'ha', label: 'hectares' }]} />
             </div>
           </Field>

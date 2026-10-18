@@ -8,6 +8,15 @@ export const num = (n: number, d = 0): string =>
 
 export const clamp = (n: number, lo: number, hi: number): number => Math.min(hi, Math.max(lo, n));
 
+/**
+ * Reads a number the way people type it: "1500", "1,500", "₱ 1,500.50", "PHP 250", "1 500".
+ * Commas are thousands separators (Philippine style), the dot is the decimal point. NaN when it is not a number.
+ */
+export function parseNumber(text: string): number {
+  const t = text.trim().replace(/^php/i, '').replace(/[₱,\s]/g, '');
+  return /^[-+]?(\d+\.?\d*|\.\d+)$/.test(t) ? Number(t) : NaN;
+}
+
 /** yyyy-mm-dd in the user's local time zone. */
 export function isoDate(d = new Date()): string {
   const y = d.getFullYear();
@@ -18,6 +27,7 @@ export function isoDate(d = new Date()): string {
 
 export function addDays(iso: string, days: number): string {
   const d = new Date(`${iso}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return ''; // no date (an emptied date field)
   d.setDate(d.getDate() + days);
   return isoDate(d);
 }
@@ -30,6 +40,7 @@ export function daysBetween(fromIso: string, toIso: string): number {
 
 export function prettyDate(iso: string): string {
   const d = new Date(`${iso}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return 'No date'; // never "Invalid Date" on screen
   return d.toLocaleDateString('en-PH', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 

@@ -6,7 +6,9 @@ import {
   addExpense, addProduction, addSale, addTask, deleteExpense, deleteProduction, deleteSale, deleteTask, farmScoped, recordHarvest, toggleTask,
 } from '@/core/actions';
 import { allItems, catalogById } from '@/data/catalog';
-import { addDays, isoDate, peso, prettyDate, sum } from '@/lib/format';
+import { addDays, isoDate, num, peso, peso2, prettyDate, sum } from '@/lib/format';
+import { toCsv } from '@/lib/csv';
+import { saveFile } from '@/lib/download';
 import type { ExpenseCategory } from '@/types';
 import { Badge, Button, Card, Empty, Field, NumberInput, PageHeader, Progress, Sheet, Stat, Tabs, toast } from '@/components/ui';
 import { Donut } from '@/components/widgets';
@@ -17,6 +19,18 @@ const TAB_LIST: { id: Tab; label: string }[] = [
   { id: 'production', label: 'Production' }, { id: 'reports', label: 'Reports' },
 ];
 const CATS: ExpenseCategory[] = ['Seeds', 'Fertilizer', 'Feed', 'Tools', 'Labor', 'Utilities', 'Others'];
+
+// Typo checks: numbers this big are usually an extra zero. The farmer can still save them after a second look.
+const BIG_AMOUNT = 1_000_000; // pesos in one expense
+const BIG_KG = 100_000; // kilos in one sale or harvest (100 tonnes)
+const PRICE_TIMES_USUAL = 5; // a price per kg this many times the usual farm-gate price
+
+/** The problem with a date from a date box, or '' when it is fine. `past`: it must be today or earlier (a sale, a cost). */
+function dateProblem(date: string, past = false): string {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return 'Choose a date';
+  if (past && date > isoDate()) return 'Choose today or an earlier date';
+  return '';
+}
 
 export function Manage({ tab }: { tab: string }) {
   const t = (TAB_LIST.some((x) => x.id === tab) ? tab : 'tasks') as Tab;
@@ -49,6 +63,7 @@ function Tasks() {
   const sorted = [...tasks].sort((a, b) => Number(a.done) - Number(b.done) || a.date.localeCompare(b.date) || (a.time ?? '').localeCompare(b.time ?? ''));
   const add = () => {
     if (!title.trim()) return toast('Type what needs to be done');
+    if (dateProblem(date)) return toast(dateProblem(date));
     addTask({ title: title.trim(), date, time: time || undefined, farmId: s.activeFarmId });
     setTitle(''); setTime('');
   };
@@ -129,10 +144,15 @@ function ExpenseSheet({ open, onClose, farmId }: { open: boolean; onClose: () =>
     <Sheet open={open} onClose={onClose} title="Add expense">
       <div className="stack">
         <Field label="Category" htmlFor="ec"><select id="ec" className="input" value={category} onChange={(e) => setCategory(e.target.value as ExpenseCategory)}>{CATS.map((c) => <option key={c}>{c}</option>)}</select></Field>
-        <Field label="Amount (₱)" htmlFor="ea"><NumberInput id="ea" value={amount} min={0} onChange={setAmount} /></Field>
+        <Field label="Amount (₱)" htmlFor="ea" hint={amount > 0 ? `= ${peso2(amount)}` : undefined}><NumberInput id="ea" value={amount} min={0} onChange={setAmount} /></Field>
         <Field label="Note (optional)" htmlFor="en"><input id="en" className="input" value={note} onChange={(e) => setNote(e.target.value)} /></Field>
-        <Field label="Date" htmlFor="ed"><input id="ed" type="date" className="input" value={date} onChange={(e) => setDate(e.target.value)} /></Field>
-        <Button block onClick={() => { if (!(amount > 0)) return toast('Enter an amount'); addExpense({ category, amount, note: note.trim(), date, farmId }); setAmount(0); setNote(''); onClose(); toast('Expense added'); }}>Save expense</Button>
+        <Field label="Date" htmlFor="ed"><input id="ed" type="date" className="input" max={isoDate()} value={date} onChange={(e) => setDate(e.target.value)} /></Field>
+        <Button block onClick={() => {
+          if (!(amount > 0)) return toast('Enter an amount');
+          if (dateProblem(date, true)) return toast(dateProblem(date, true));
+          if (amount >= BIG_AMOUNT && !confirm(`Save an expense of ${peso2(amount)}? Check that there is no extra zero.`)) return;
+          addExpense({ category, amount, note: note.trim(), date, farmId }); setAmount(0); setNote(''); onClose(); toast('Expense added');
+        }}>Save expense</Button>
       </div>
     </Sheet>
   );
@@ -169,6 +189,20 @@ function SaleSheet({ open, onClose, farmId }: { open: boolean; onClose: () => vo
   const [kg, setKg] = useState(0);
   const [price, setPrice] = useState(0);
   const [buyer, setBuyer] = useState('');
+  const [date, setDate] = useState(isoDate());
+  const save = () => {
+    if (!(kg > 0 && price > 0)) return toast('Enter kilos and price');
+    if (dateProblem(date, true)) return toast(dateProblem(date, true));
+    const item = catalogById(itemId);
+    const usual = item?.farmGatePerKg ?? 0;
+    const odd = [
+      kg >= BIG_KG ? `${num(kg)} kg sold` : '',
+      usual > 0 && price > usual * PRICE_TIMES_USUAL ? `${peso2(price)} per kg (usually about ${peso(usual)} at the farm gate)` : '',
+    ].filter(Boolean);
+    if (odd.length && !confirm(`Please check: ${odd.join(' and ')}. Save this sale of ${peso2(kg * price)} anyway?`)) return;
+    addSale({ itemId, kg, pricePerKg: price, buyer: buyer.trim() || undefined, date, farmId });
+    setKg(0); setPrice(0); setBuyer(''); setDate(isoDate()); onClose(); toast('Sale recorded');
+  };
   return (
     <Sheet open={open} onClose={onClose} title="Record a sale">
       <div className="stack">
@@ -177,8 +211,10 @@ function SaleSheet({ open, onClose, farmId }: { open: boolean; onClose: () => vo
           <Field label="Kilos sold" htmlFor="sk"><NumberInput id="sk" value={kg} min={0} onChange={setKg} /></Field>
           <Field label="Price per kg (₱)" htmlFor="sp"><NumberInput id="sp" value={price} min={0} onChange={setPrice} /></Field>
         </div>
+        {kg > 0 && price > 0 ? <p className="small muted">Total: <b>{peso2(kg * price)}</b></p> : null}
+        <Field label="Date sold" htmlFor="sd"><input id="sd" type="date" className="input" max={isoDate()} value={date} onChange={(e) => setDate(e.target.value)} /></Field>
         <Field label="Buyer (optional)" htmlFor="sb"><input id="sb" className="input" value={buyer} onChange={(e) => setBuyer(e.target.value)} /></Field>
-        <Button block onClick={() => { if (!(kg > 0 && price > 0)) return toast('Enter kilos and price'); addSale({ itemId, kg, pricePerKg: price, buyer: buyer.trim() || undefined, date: isoDate(), farmId }); setKg(0); setPrice(0); setBuyer(''); onClose(); toast('Sale recorded'); }}>Save sale</Button>
+        <Button block onClick={save}>Save sale</Button>
       </div>
     </Sheet>
   );
@@ -223,7 +259,11 @@ function Production() {
         {harvest ? (
           <div className="stack">
             <Field label="Kilos harvested" htmlFor="hk"><NumberInput id="hk" value={harvest.kg} min={0} onChange={(kg) => setHarvest({ ...harvest, kg })} /></Field>
-            <Button block onClick={() => { if (!(harvest.kg > 0)) return toast('Enter the kilos'); recordHarvest(harvest.id, harvest.kg); setHarvest(null); toast('Harvest recorded'); }}>Save harvest</Button>
+            <Button block onClick={() => {
+              if (!(harvest.kg > 0)) return toast('Enter the kilos');
+              if (harvest.kg >= BIG_KG && !confirm(`Save a harvest of ${num(harvest.kg)} kg? Check that there is no extra zero.`)) return;
+              recordHarvest(harvest.id, harvest.kg); setHarvest(null); toast('Harvest recorded');
+            }}>Save harvest</Button>
           </div>
         ) : null}
       </Sheet>
@@ -241,7 +281,7 @@ function ProductionSheet({ open, onClose, farmId }: { open: boolean; onClose: ()
         <Field label="What did you plant or stock?" htmlFor="pi"><select id="pi" className="input" value={itemId} onChange={(e) => setItemId(e.target.value)}>{allItems().map((c) => <option key={c.id} value={c.id}>{c.emoji} {c.name}</option>)}</select></Field>
         <Field label="Area (sqm)" htmlFor="pa"><NumberInput id="pa" value={area} min={0} onChange={setArea} /></Field>
         <Field label="Started on" htmlFor="pd"><input id="pd" type="date" className="input" value={date} onChange={(e) => setDate(e.target.value)} /></Field>
-        <Button block onClick={() => { if (!(area > 0)) return toast('Enter the area'); addProduction({ itemId, areaSqm: area, plantedOn: date, farmId }); setArea(0); onClose(); toast('Record added'); }}>Save record</Button>
+        <Button block onClick={() => { if (!(area > 0)) return toast('Enter the area'); if (dateProblem(date)) return toast(dateProblem(date)); addProduction({ itemId, areaSqm: area, plantedOn: date, farmId }); setArea(0); onClose(); toast('Record added'); }}>Save record</Button>
       </div>
     </Sheet>
   );
@@ -269,12 +309,7 @@ function Reports() {
     sales.forEach((x) => rows.push(['sale', x.date, catalogById(x.itemId)?.name ?? x.itemId, x.buyer ?? '', String(x.kg), String(x.pricePerKg), String(x.kg * x.pricePerKg)]));
     expenses.forEach((x) => rows.push(['expense', x.date, x.category, x.note, '', '', String(-x.amount)]));
     production.forEach((x) => rows.push(['production', x.plantedOn, catalogById(x.itemId)?.name ?? x.itemId, `${x.areaSqm} sqm`, String(x.harvestedKg ?? ''), '', '']));
-    const csv = rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n');
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
-    a.download = `may-ani-report-${isoDate()}.csv`;
-    a.click();
-    URL.revokeObjectURL(a.href);
+    saveFile(`may-ani-report-${isoDate()}.csv`, toCsv(rows), 'text/csv;charset=utf-8');
   };
 
   return (

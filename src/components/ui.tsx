@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
+import { num, parseNumber } from '@/lib/format';
 import { LuCircleAlert, LuInfo, LuShieldAlert, LuTriangleAlert, LuX } from 'react-icons/lu';
 import type { AppIcon } from '@/types';
 
@@ -204,30 +205,51 @@ export function ToastHost() {
   return msg ? <div className="toast" role="status">{msg}</div> : null;
 }
 
-/** Numeric input that keeps its own text so users can clear/retype freely. */
-export function NumberInput(p: { value: number; onChange: (n: number) => void; min?: number; max?: number; step?: number; id?: string; placeholder?: string; 'aria-label'?: string }) {
+/**
+ * Number box that keeps the user's own text, so they can clear and retype freely. Accepts "1,500" and "₱1,500.50"
+ * (a type="number" box treats those as empty). Something that is not a number counts as 0 and says so under the box;
+ * min and max are pointed out once the user leaves the box (forms still check them before saving).
+ */
+export function NumberInput(p: { value: number; onChange: (n: number) => void; min?: number; max?: number; id?: string; placeholder?: string; 'aria-label'?: string }) {
   const [text, setText] = useState(Number.isFinite(p.value) && p.value !== 0 ? String(p.value) : '');
+  const [left, setLeft] = useState(false);
+  const reported = useRef(p.value);
   useEffect(() => {
-    // external change (e.g. area measured on the map) -> sync, but don't fight the user's typing
-    if (Number(text) !== p.value) setText(p.value ? String(p.value) : '');
+    // A change from outside (e.g. the area measured on the map) replaces the text; our own reports do not, so typing is never undone.
+    if (p.value !== reported.current) {
+      reported.current = p.value;
+      setText(p.value ? String(p.value) : '');
+    }
   }, [p.value]);
+  const n = parseNumber(text);
+  const problem = text.trim() === '' ? ''
+    : Number.isNaN(n) ? 'Type a number, like 1,500'
+      : left && p.min !== undefined && n < p.min ? `Use ${num(p.min, 2)} or more`
+        : left && p.max !== undefined && n > p.max ? `Use ${num(p.max, 2)} or less` : '';
+  const errId = p.id ? `${p.id}-problem` : undefined;
   return (
-    <input
-      id={p.id}
-      className="input"
-      inputMode="decimal"
-      type="number"
-      min={p.min}
-      max={p.max}
-      step={p.step ?? 'any'}
-      value={text}
-      placeholder={p.placeholder}
-      aria-label={p['aria-label']}
-      onChange={(e) => {
-        setText(e.target.value);
-        const n = Number(e.target.value);
-        p.onChange(e.target.value === '' || !Number.isFinite(n) ? 0 : n);
-      }}
-    />
+    <>
+      <input
+        id={p.id}
+        className="input"
+        inputMode="decimal"
+        type="text"
+        autoComplete="off"
+        value={text}
+        placeholder={p.placeholder}
+        aria-label={p['aria-label']}
+        aria-invalid={problem ? true : undefined}
+        aria-describedby={problem ? errId : undefined}
+        onBlur={() => setLeft(true)}
+        onFocus={() => setLeft(false)}
+        onChange={(e) => {
+          setText(e.target.value);
+          const v = parseNumber(e.target.value);
+          reported.current = Number.isNaN(v) ? 0 : v;
+          p.onChange(reported.current);
+        }}
+      />
+      {problem ? <span id={errId} className="field-error">{problem}</span> : null}
+    </>
   );
 }

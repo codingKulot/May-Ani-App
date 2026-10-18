@@ -16,22 +16,28 @@ export const OFF = ' ';
 
 export interface Srv { url: string; port: number; log: () => string; stop: () => void }
 
-export async function startServer(env: Record<string, string>): Promise<Srv> {
+/** Tests make many AI calls from one address: the daily allowance (server/limits.mjs) is set high unless a test sets its own. */
+const NO_DAILY_LIMITS: Record<string, string> = Object.fromEntries(
+  ['AI', 'PICTURES'].flatMap((k) => ['GUEST', 'GUEST_PER_IP', 'ACCOUNT', 'TOTAL'].map((w) => [`${k}_DAILY_${w}`, '100000'])),
+);
+
+/** `dataDir`: a folder for the chat data file (data.json), when a test wants to look at it; otherwise a temporary one. */
+export async function startServer(env: Record<string, string>, dataDir?: string): Promise<Srv> {
   const port = 20000 + Math.floor(Math.random() * 30000);
-  const dir = mkdtempSync(join(tmpdir(), 'may-ani-test-'));
+  const dir = dataDir ?? mkdtempSync(join(tmpdir(), 'may-ani-test-'));
   let log = '';
   const proc = spawn(process.execPath, ['server/index.mjs'], {
     cwd: ROOT,
     env: {
       ...process.env, PORT: String(port), DATA_FILE: join(dir, 'data.json'), ANTHROPIC_API_KEY: OFF, GEMINI_API_KEY: OFF, OPENAI_API_KEY: OFF,
-      SMTP_USER: OFF, SMTP_PASSWORD: OFF, AUTH_RATE_PER_MIN: '1000', RESET_RATE_PER_MIN: '1000', ...env,
+      MONGODB_URI: OFF, SMTP_USER: OFF, SMTP_PASSWORD: OFF, AUTH_RATE_PER_MIN: '1000', RESET_RATE_PER_MIN: '1000', ...NO_DAILY_LIMITS, ...env,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   proc.stdout.on('data', (d) => (log += d));
   proc.stderr.on('data', (d) => (log += d));
   const url = `http://127.0.0.1:${port}`;
-  const stop = () => { proc.kill(); rmSync(dir, { recursive: true, force: true }); };
+  const stop = () => { proc.kill(); if (!dataDir) rmSync(dir, { recursive: true, force: true }); };
   for (let i = 0; i < 100 && proc.exitCode === null; i++) {
     try {
       if ((await fetch(`${url}/api/health`)).ok) return { url, port, log: () => log, stop };

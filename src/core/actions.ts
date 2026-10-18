@@ -4,11 +4,12 @@ import type {
   PlanBuild, Profile, Sale, SavedPlan, Task, CatalogItem } from '@/types';
 import { isoDate } from '@/lib/format';
 import { deletePhotos } from '@/lib/photoStore';
+import { saveFile } from '@/lib/download';
 import { buildFarm, type FarmFormInput } from '@/services/farmForm';
 import { DEFAULT_PLACE } from '@/data/places';
 import { logOut } from '@/services/auth';
 import { forgetSync } from '@/services/sync';
-import { LIST_COLLECTIONS, PREF_IDS, type PrefId } from '@/services/sync/records';
+import { LIST_COLLECTIONS, PREF_IDS, cleanBackup, type PrefId } from '@/services/sync/records';
 
 /** All state mutations live here so pages stay declarative and the rules are in one testable place. */
 
@@ -212,17 +213,34 @@ export function exportData(): string {
   return JSON.stringify(getState(), null, 2);
 }
 
-export function importData(json: string): { ok: boolean; error?: string } {
+/** Saves a backup file of everything on this phone (photos are not in it). */
+export function downloadBackup() {
+  saveFile(`may-ani-backup-${isoDate()}.json`, exportData(), 'application/json');
+}
+
+/**
+ * Restores a backup file. Only farm data comes in, checked item by item (services/sync/records.ts cleanBackup); this phone's
+ * profile, login and settings stay as they are. Lists in the file replace the same lists on this phone; the rest is kept.
+ * `skipped` counts damaged items that were left out.
+ */
+export function importData(json: string): { ok: boolean; error?: string; skipped?: number } {
+  let parsed: unknown;
   try {
-    const parsed = JSON.parse(json) as Partial<AppState>;
-    if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.farms) || !Array.isArray(parsed.plans)) {
-      return { ok: false, error: 'This file is not an May-Ani backup.' };
-    }
-    setState((s) => ({ ...s, ...(parsed as AppState) }));
-    return { ok: true };
+    parsed = JSON.parse(json);
   } catch {
     return { ok: false, error: 'This file could not be read.' };
   }
+  const file = parsed as Record<string, unknown> | null;
+  if (!file || typeof file !== 'object' || !Array.isArray(file.farms) || !Array.isArray(file.plans)) {
+    return { ok: false, error: 'This file is not a May-Ani backup.' };
+  }
+  const { patch, skipped } = cleanBackup(file);
+  setState((s) => {
+    const next = { ...s, ...patch };
+    if (!next.farms.some((f) => f.id === next.activeFarmId)) next.activeFarmId = next.farms[0]?.id;
+    return next;
+  });
+  return { ok: true, skipped };
 }
 
 /** Deletes everything on this phone and logs out. The account and the farm data saved in it are not deleted. */

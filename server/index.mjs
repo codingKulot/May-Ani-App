@@ -18,9 +18,12 @@
 //       Password reset email (optional): SMTP_USER (Gmail address), SMTP_PASSWORD (Gmail app password), EMAIL_FROM,
 //       APP_URL (where the link in the email opens the app, default http://localhost:PORT), RESET_RATE_PER_MIN (5 per IP),
 //       SMTP_HOST (smtp.gmail.com), SMTP_PORT (465)
+//       Daily AI allowance (server/limits.mjs): AI_DAILY_GUEST (5 per guest phone), AI_DAILY_GUEST_PER_IP (30), AI_DAILY_ACCOUNT (20),
+//       AI_DAILY_TOTAL (300 for the whole server), PICTURES_DAILY_GUEST (3), PICTURES_DAILY_GUEST_PER_IP (15),
+//       PICTURES_DAILY_ACCOUNT (9), PICTURES_DAILY_TOTAL (60). Behind a proxy: TRUST_PROXY (loopback | a number | proxy IPs).
 
 import http from 'node:http';
-import { readFile, writeFile, stat } from 'node:fs/promises';
+import { readFile, rename, writeFile, stat } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import path from 'node:path';
@@ -29,6 +32,7 @@ import { authRoutes, dbProblem, openAccounts } from './auth.mjs';
 import { syncRoutes } from './sync.mjs';
 import { mailProblem, openMailer } from './mail.mjs';
 import { resetRoutes } from './reset.mjs';
+import { clientIp, dailyQuota, describeTrust, envCount, parseTrustProxy } from './limits.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DIST = path.resolve(__dirname, '../dist');
@@ -50,16 +54,38 @@ const API_KEY = (process.env.ANTHROPIC_API_KEY || '').trim();
 const BASE_URL = (process.env.ANTHROPIC_BASE_URL || 'https://api.anthropic.com').replace(/\/$/, '');
 const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || '*';
 const MAX_BODY = 12 * 1024 * 1024; // a few downscaled photos
+const TRUST = parseTrustProxy(process.env.TRUST_PROXY); // see server/limits.mjs
 
-// ------------------------------------------------------------------ persistence
+// ------------------------------------------------------------------ persistence (chat users and messages)
 let db = { users: {}, messages: [] };
 if (existsSync(DATA_FILE)) {
-  try { db = JSON.parse(await readFile(DATA_FILE, 'utf8')); } catch { /* start fresh */ }
+  try {
+    const saved = JSON.parse(await readFile(DATA_FILE, 'utf8'));
+    if (!saved || typeof saved.users !== 'object' || !saved.users || Array.isArray(saved.users) || !Array.isArray(saved.messages)) throw new Error('not chat data');
+    db = saved;
+  } catch (e) {
+    // Never overwrite chat data that cannot be read: move it aside (it may be repairable) and start fresh.
+    const aside = `${DATA_FILE}.damaged-${Date.now()}`;
+    await rename(DATA_FILE, aside).catch(() => {});
+    console.error(`Chat: ${DATA_FILE} could not be read (${e.message}). It was moved to ${aside}; chat starts empty.`);
+  }
 }
 let saveTimer = null;
+let saving = Promise.resolve();
 function save() {
   clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => writeFile(DATA_FILE, JSON.stringify(db)).catch(() => {}), 500);
+  saveTimer = setTimeout(() => { saving = saving.then(writeData); }, 500);
+}
+/** Writes a temporary file, then swaps it in, so a crash or power cut mid-write never leaves a half-written data file. */
+async function writeData() {
+  const tmp = `${DATA_FILE}.tmp`;
+  try {
+    await writeFile(tmp, JSON.stringify(db));
+    // On Windows the swap can fail for a moment while antivirus or backup software has the file open; then write in place.
+    await rename(tmp, DATA_FILE).catch(() => writeFile(DATA_FILE, JSON.stringify(db)));
+  } catch (e) {
+    console.error(`Chat: could not save ${DATA_FILE} (${e.message}).`);
+  }
 }
 
 // ------------------------------------------------------------------ helpers
@@ -69,7 +95,7 @@ const json = (res, code, body, extra = {}) => {
 };
 const cors = () => ({
   'Access-Control-Allow-Origin': ALLOWED_ORIGIN,
-  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Device-Id',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
 });
 
@@ -85,11 +111,10 @@ async function readJson(req, max = MAX_BODY) {
   catch { throw Object.assign(new Error('Invalid JSON'), { status: 400 }); }
 }
 
-// very small fixed-window rate limiter (per IP + bucket)
+// very small fixed-window rate limiter (per IP + bucket). Behind a proxy, set TRUST_PROXY so each user has their own IP here.
 const hits = new Map();
 function limited(req, bucket, max, windowMs = 60_000) {
-  const ip = req.socket.remoteAddress || 'x';
-  const key = `${bucket}:${ip}`;
+  const key = `${bucket}:${clientIp(req, TRUST)}`;
   const now = Date.now();
   const h = hits.get(key);
   if (!h || now - h.start > windowMs) { hits.set(key, { start: now, n: 1 }); return false; }
@@ -125,6 +150,25 @@ const APP_URL = (() => {
     return u.protocol === 'http:' || u.protocol === 'https:' ? `${u.origin}${u.pathname.replace(/\/+$/, '')}` : '';
   } catch { return ''; }
 })();
+// Sent with every answer: they tell the browser what this site may do, so an injected script, a page that frames the app, or a
+// mislabelled file can do much less harm. The app's own outside services: Open-Meteo (weather, places), USGS (earthquakes),
+// OpenStreetMap tiles (map). "https:" in connect-src allows a market price feed or server address set in Settings.
+const SECURITY_HEADERS = {
+  'Content-Security-Policy': [
+    "default-src 'self'", "script-src 'self'", "style-src 'self'", "img-src 'self' data: blob: https://tile.openstreetmap.org",
+    "connect-src 'self' https:", "font-src 'self'", "worker-src 'self'", "manifest-src 'self'", "object-src 'none'",
+    "base-uri 'none'", "form-action 'self'", "frame-ancestors 'none'", ...(APP_URL.startsWith('https:') ? ['upgrade-insecure-requests'] : []),
+  ].join('; '),
+  'X-Content-Type-Options': 'nosniff',
+  'X-Frame-Options': 'DENY',
+  // Other sites see only "may-ani.example", never the page or anything after it (OpenStreetMap needs at least that much).
+  'Referrer-Policy': 'strict-origin-when-cross-origin',
+  'Permissions-Policy': 'camera=(self), geolocation=(self), microphone=(), payment=(), usb=()',
+  'Cross-Origin-Opener-Policy': 'same-origin',
+  // Only on a real website with HTTPS: browsers then refuse plain http for this site for 180 days.
+  ...(APP_URL.startsWith('https:') ? { 'Strict-Transport-Security': 'max-age=15552000' } : {}),
+};
+
 let emailOff = APP_URL ? '' : 'OFF - APP_URL must be a web address, like http://192.168.1.20:8787';
 const mailer = APP_URL ? await openMailer(process.env).catch((e) => { emailOff = `OFF - ${e.message}`; return null; }) : null;
 if (!mailer && !emailOff) emailOff = 'OFF - add SMTP_USER and SMTP_PASSWORD to the .env file';
@@ -138,6 +182,65 @@ const handleAuth = accounts
 const handleSync = accounts
   ? syncRoutes(accounts, { json, readJson, limited }, { perMinute: Number(process.env.SYNC_RATE_PER_MIN) || 120, dbProblem })
   : (_req, res) => json(res, 503, { error: 'Accounts are not set up on this server yet, so farm data cannot be saved to an account. It is safe on this phone.' });
+
+// ------------------------------------------------------------------ daily allowance for paid AI (server/limits.mjs)
+// Every photo check and every picture costs money on the owner's accounts. Guests get a few per phone per day (the app sends a
+// random phone id; many phones can share one mobile-data IP address, so the address gets a bigger guest total), accounts get more,
+// and the whole server has a daily total. The numbers come from .env; 0 means none.
+const LIMITS = {
+  ai: {
+    guest: envCount(process.env, 'AI_DAILY_GUEST', 5), guestPerIp: envCount(process.env, 'AI_DAILY_GUEST_PER_IP', 30),
+    account: envCount(process.env, 'AI_DAILY_ACCOUNT', 20), total: envCount(process.env, 'AI_DAILY_TOTAL', 300),
+  },
+  pictures: {
+    guest: envCount(process.env, 'PICTURES_DAILY_GUEST', 3), guestPerIp: envCount(process.env, 'PICTURES_DAILY_GUEST_PER_IP', 15),
+    account: envCount(process.env, 'PICTURES_DAILY_ACCOUNT', 9), total: envCount(process.env, 'PICTURES_DAILY_TOTAL', 60),
+  },
+};
+const quotas = { ai: dailyQuota(LIMITS.ai), pictures: dailyQuota(LIMITS.pictures) };
+const DEVICE_RE = /^[A-Za-z0-9_-]{8,64}$/;
+
+/** A logged-in account (by its login), or a guest (by the app's random phone id, plus the IP address). */
+async function whoIsAsking(req) {
+  const ip = clientIp(req, TRUST);
+  const token = (req.headers.authorization || '').replace(/^Bearer\s+/i, '').trim();
+  if (accounts && token) {
+    try {
+      const user = await accounts.userForToken(token);
+      if (user) return { userId: String(user._id), ip };
+    } catch { /* the database cannot be reached: count this as a guest rather than refuse */ }
+  }
+  const device = String(req.headers['x-device-id'] || '');
+  return { device: DEVICE_RE.test(device) ? device : '', ip };
+}
+
+/** Takes one use of today's allowance (`kind`: ai or pictures). When none is left, answers 429 with the reason and returns null. */
+async function takeQuota(req, res, kind) {
+  const r = quotas[kind].take(await whoIsAsking(req));
+  if (r.ok) return r;
+  const what = kind === 'ai' ? 'AI checks' : 'AI pictures';
+  const again = 'They start again at midnight (Philippine time).';
+  const signUp = accounts && LIMITS[kind].account > 0 ? ` Create a free account in Settings to get ${LIMITS[kind].account} a day.` : '';
+  const error = r.reason === 'total' ? `The May-Ani server has used all of today's ${what}. ${again}`
+    : r.reason === 'account' ? `You have used your ${r.limit} ${what} for today. ${again}`
+      : r.limit === 0 ? `${what} on this server need an account.${signUp}`
+        : r.reason === 'device' ? `This phone has used today's ${r.limit} free ${what}. ${again}${signUp}`
+          : `Guests on this internet connection have used today's free ${what}. ${again}${signUp}`;
+  json(res, 429, { error, code: r.reason === 'total' ? 'ai_daily_cap' : 'ai_quota' });
+  return null;
+}
+
+// Failures that cost nothing give the use back: no credit, key refused, AI unreachable or busy, or an error answer from the
+// picture service. A timeout or an unreadable answer may have been charged, so it still counts.
+const NOT_CHARGED = new Set(['ai_billing', 'ai_key', 'ai_offline', 'ai_busy']);
+async function paid(ticket, call) {
+  try {
+    return await call();
+  } catch (e) {
+    if (e.notCharged || NOT_CHARGED.has(e.aiCode)) ticket.release();
+    throw e;
+  }
+}
 
 // ------------------------------------------------------------------ Claude
 const ALLOWED_MEDIA = new Set(['image/jpeg', 'image/png', 'image/webp']);
@@ -278,6 +381,8 @@ async function handleDiagnose(req, res) {
   const images = imageBlocks(b.image ? [b.image] : []);
   if (b.image && images.length === 0) return json(res, 400, { error: 'That photo could not be used. Please take or choose a JPG or PNG photo.' });
   if (!desc && images.length === 0) return json(res, 400, { error: 'Add a photo or describe the problem.' });
+  const ticket = await takeQuota(req, res, 'ai');
+  if (!ticket) return;
   const content = [
     ...images,
     {
@@ -290,7 +395,7 @@ async function handleDiagnose(req, res) {
       ].join('\n'),
     },
   ];
-  const out = await claude(DIAG_SYSTEM, content, { effort: 'medium' });
+  const out = await paid(ticket, () => claude(DIAG_SYSTEM, content, { effort: 'medium' }));
   const subject = PHOTO_SUBJECTS.includes(out.subject) ? out.subject : undefined;
   const ids = new Set();
   const results = (subject && !FARM_SUBJECTS.includes(subject) ? [] : Array.isArray(out.results) ? out.results : [])
@@ -319,7 +424,9 @@ async function handleSite(req, res) {
   const b = await readJson(req);
   const images = imageBlocks(b.images);
   if (images.length === 0) return json(res, 400, { error: 'Add at least one photo of the area.' });
-  const out = await claude(SITE_SYSTEM, [...images, { type: 'text', text: `Planned use: ${str(b.sector, 20)}. Analyse the site.` }]);
+  const ticket = await takeQuota(req, res, 'ai');
+  if (!ticket) return;
+  const out = await paid(ticket, () => claude(SITE_SYSTEM, [...images, { type: 'text', text: `Planned use: ${str(b.sector, 20)}. Analyse the site.` }]));
   const s = out.site && typeof out.site === 'object' ? out.site : {};
   const site = {};
   if (['flat', 'gentle', 'steep'].includes(s.slope)) site.slope = s.slope;
@@ -370,7 +477,9 @@ async function handleSurvey(req, res) {
   const b = await readJson(req);
   const images = imageBlocks(b.image ? [b.image] : []);
   if (images.length === 0) return json(res, 400, { error: 'Add a photo of the area.' });
-  const out = await claude(SURVEY_SYSTEM, [...images, { type: 'text', text: 'Survey this site for a small vegetable garden.' }]);
+  const ticket = await takeQuota(req, res, 'ai');
+  if (!ticket) return;
+  const out = await paid(ticket, () => claude(SURVEY_SYSTEM, [...images, { type: 'text', text: 'Survey this site for a small vegetable garden.' }]));
   const num = (v, lo, hi) => { const n = Number(v); return Number.isFinite(n) && n >= lo && n <= hi ? Math.round(n * 10) / 10 : undefined; };
   json(res, 200, {
     floorQuad: cleanQuad(out.floorQuad),
@@ -427,16 +536,19 @@ async function providerCall(url, init, what) {
     const r = await fetch(url, { ...init, signal: ctl.signal });
     const text = await r.text();
     if (!r.ok) {
+      // The provider's own words go to the server log only (like Claude's errors): they can name the account or the request.
       console.error(`${what} error`, r.status, text.slice(0, 400));
-      let detail = '';
-      try { const j = JSON.parse(text); detail = j?.error?.message || j?.message || ''; } catch { /* not json */ }
-      const hint = r.status === 401 || r.status === 403 ? ' Check the key in your .env file.' : r.status === 404 ? ' The model name may be wrong; set GEMINI_IMAGE_MODEL or OPENAI_IMAGE_MODEL.' : r.status === 429 ? ' You may be out of credit or over the rate limit.' : '';
-      throw Object.assign(new Error(`${what} could not make the picture (${r.status}${detail ? `: ${String(detail).slice(0, 160)}` : ''}).${hint}`), { status: 502 });
+      const hint = r.status === 401 || r.status === 403 ? ' The server owner should check the key in the .env file.'
+        : r.status === 404 ? ' The server owner may need to set GEMINI_IMAGE_MODEL or OPENAI_IMAGE_MODEL (see the server log).'
+          : r.status === 429 ? ' The picture account may be out of credit or busy. Please try again later.' : ' Please try again.';
+      throw Object.assign(new Error(`${what} could not make the picture (error ${r.status}).${hint}`), { status: 502, notCharged: true });
     }
     try { return JSON.parse(text); } catch { throw Object.assign(new Error(`${what} sent an unreadable answer.`), { status: 502 }); }
   } catch (e) {
     if (e.name === 'AbortError') throw Object.assign(new Error(`${what} took too long. Please try again.`), { status: 504 });
-    throw e;
+    if (e.status) throw e;
+    console.error(`${what} not reachable:`, e.message);
+    throw Object.assign(new Error(`The May-Ani server cannot reach ${what} right now. Please try again later.`), { status: 502, notCharged: true });
   } finally { clearTimeout(t); }
 }
 
@@ -468,7 +580,9 @@ async function handleRender(req, res) {
   const im = b.image;
   if (prompt.length < 40) return json(res, 400, { error: 'The picture request was empty.' });
   if (!im || !ALLOWED_MEDIA.has(im.mediaType) || typeof im.data !== 'string' || im.data.length < 100 || im.data.length > 4_500_000) return json(res, 400, { error: 'Add a photo of the area first.' });
-  const out = provider === 'gemini' ? await renderGemini(prompt, im) : await renderOpenAI(prompt, im);
+  const ticket = await takeQuota(req, res, 'pictures');
+  if (!ticket) return;
+  const out = await paid(ticket, () => (provider === 'gemini' ? renderGemini(prompt, im) : renderOpenAI(prompt, im)));
   if (!out) throw Object.assign(new Error('The image service did not return a picture (it may have refused the photo). Try another photo or try again.'), { status: 502 });
   json(res, 200, { image: out, provider });
 }
@@ -538,9 +652,12 @@ function handleStream(req, res, url) {
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.json': 'application/json', '.webmanifest': 'application/manifest+json', '.png': 'image/png', '.jpg': 'image/jpeg', '.map': 'application/json' };
 
 async function serveStatic(req, res, url) {
+  let wanted;
+  try { wanted = decodeURIComponent(url.pathname); } catch { return json(res, 400, { error: 'Bad address' }); } // a broken %-code
+  let file = path.join(DIST, wanted);
+  // Only files inside dist. The separator matters: a plain startsWith(DIST) would also allow a folder next to it, like "dist-old".
+  if (file !== DIST && !file.startsWith(DIST + path.sep)) return json(res, 403, { error: 'Forbidden' });
   if (!existsSync(DIST)) return json(res, 404, { error: 'Frontend not built. Run: bun run build' });
-  let file = path.join(DIST, decodeURIComponent(url.pathname));
-  if (!file.startsWith(DIST)) return json(res, 403, { error: 'Forbidden' });
   try { if ((await stat(file)).isDirectory()) file = path.join(file, 'index.html'); }
   catch { file = path.join(DIST, 'index.html'); } // SPA fallback
   const body = await readFile(file);
@@ -551,9 +668,17 @@ async function serveStatic(req, res, url) {
 // ------------------------------------------------------------------ router
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
+  for (const [name, value] of Object.entries(SECURITY_HEADERS)) res.setHeader(name, value);
   try {
     if (req.method === 'OPTIONS') { res.writeHead(204, cors()); return res.end(); }
-    if (url.pathname === '/api/health') return json(res, 200, { ai: !!API_KEY, chat: true, accounts: !!accounts, reset: !!(accounts && mailer), model: API_KEY ? MODEL : undefined, render: imageProvider() });
+    if (url.pathname === '/api/health') {
+      // `daily`: today's free AI uses per guest phone and per account, so the app can tell people before they run out
+      const daily = (k) => ({ guest: LIMITS[k].guest, ...(accounts ? { account: LIMITS[k].account } : {}) });
+      return json(res, 200, {
+        ai: !!API_KEY, chat: true, accounts: !!accounts, reset: !!(accounts && mailer), model: API_KEY ? MODEL : undefined, render: imageProvider(),
+        daily: { ai: daily('ai'), pictures: daily('pictures') },
+      });
+    }
     if (url.pathname.startsWith('/api/auth/')) return await handleAuth(req, res, url);
     if (url.pathname === '/api/sync') return await handleSync(req, res);
     if (req.method === 'POST' && url.pathname === '/api/ai/diagnose') return await handleDiagnose(req, res);
@@ -577,6 +702,11 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, () => {
   console.log(`May-Ani server on http://localhost:${PORT}  |  AI: ${API_KEY ? `on (${MODEL})` : 'OFF - add ANTHROPIC_API_KEY to the .env file'}  |  pictures: ${imageProvider() ?? 'OFF - add GEMINI_API_KEY or OPENAI_API_KEY'}  |  chat: on  |  accounts: ${accounts ? 'on (MongoDB)' : accountsOff}  |  email: ${mailer ? `on (${mailer.host}), reset links open ${APP_URL}` : emailOff}`);
+  const day = (k) => `${LIMITS[k].guest} per guest phone, ${LIMITS[k].account} per account, ${LIMITS[k].total} in total`;
+  console.log(`Daily limits: AI checks ${day('ai')}; pictures ${day('pictures')}.  |  proxy: ${TRUST.mode === 'off' ? 'none (TRUST_PROXY off)' : `trusted (${describeTrust(TRUST)})`}`);
+  if (ALLOWED_ORIGIN === '*' && APP_URL.startsWith('https:')) {
+    console.log(`Tip: set ALLOWED_ORIGIN=${new URL(APP_URL).origin} in the .env file, so other websites cannot use this server from their pages.`);
+  }
   accounts?.check().then(
     () => console.log('Accounts: connected to MongoDB.'),
     (e) => console.error(`Accounts: cannot use MongoDB yet. ${dbProblem(e) || ''} (${e.message}) Sign-up and log-in will keep retrying.`),

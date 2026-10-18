@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { LuDownload, LuUpload } from 'react-icons/lu';
-import { useAppState } from '@/core/store';
-import { exportData, hasUserData, importData, unlinkAccount, updateProfile, updateSettings, wipeAllData } from '@/core/actions';
+import { damagedCopy, forgetDamagedCopy, useAppState } from '@/core/store';
+import { saveFile } from '@/lib/download';
+import { isoDate } from '@/lib/format';
+import { downloadBackup, hasUserData, importData, unlinkAccount, updateProfile, updateSettings, wipeAllData } from '@/core/actions';
 import { placeLabel } from '@/data/places';
 import { ApiError, serverStatus, type ServerStatus } from '@/services/ai';
 import { clearSession, saveAccountProfile } from '@/services/auth';
-import { isoDate } from '@/lib/format';
 import type { Profile } from '@/types';
 import { Alert, Badge, Button, Card, Chips, Field, LinkButton, PageHeader, toast } from '@/components/ui';
 import { PlaceSelect } from '@/components/widgets';
@@ -22,6 +23,7 @@ export function Settings() {
   const [status, setStatus] = useState<ServerStatus | null | 'checking'>('checking');
   const file = useRef<HTMLInputElement | null>(null);
   const [install, setInstall] = useState<any>(null);
+  const [damaged, setDamaged] = useState(damagedCopy);
 
   useEffect(() => { serverStatus(true).then(setStatus); }, [s.settings.apiBase]);
   useEffect(() => {
@@ -43,14 +45,6 @@ export function Settings() {
         toast('Saved on this phone. Could not update your account right now.');
       }
     });
-  };
-
-  const download = () => {
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(new Blob([exportData()], { type: 'application/json' }));
-    a.download = `may-ani-backup-${isoDate()}.json`;
-    a.click();
-    URL.revokeObjectURL(a.href);
   };
 
   return (
@@ -106,14 +100,25 @@ export function Settings() {
               ? 'Your farms, plans and records are on this device and saved to your account. A backup file is an extra copy you keep yourself (photos are not in it).'
               : 'Your farms, plans and records are stored on this device only. Download a backup before changing phones, or create an account.'}</p>
             {hasData ? null : <p className="small muted">Nothing to back up or delete yet. Add a farm, plan or record first. You can still restore a backup file.</p>}
+            {damaged ? (
+              <Alert tone="orange" title="Older data that could not be read" action={
+                <div className="row wrap" style={{ marginTop: 8 }}>
+                  <Button size="sm" variant="secondary" onClick={() => saveFile(`may-ani-damaged-data-${isoDate()}.json`, damaged, 'application/json')}>Download it</Button>
+                  <Button size="sm" variant="ghost" onClick={() => { if (confirm('Delete the copy of the data that could not be read? This cannot be undone.')) { forgetDamagedCopy(); setDamaged(null); } }}>Delete it</Button>
+                </div>
+              }>
+                At one start-up May-Ani could not read the data saved on this phone, so it kept a copy. Download it before deleting it: someone who knows computers may be able to repair it, and parts of it can be restored as a backup.
+              </Alert>
+            ) : null}
             <div className="row wrap">
-              <Button variant="secondary" onClick={download} disabled={!hasData}><LuDownload size={16} /> Back up</Button>
+              <Button variant="secondary" onClick={downloadBackup} disabled={!hasData}><LuDownload size={16} /> Back up</Button>
               <Button variant="secondary" onClick={() => file.current?.click()}><LuUpload size={16} /> Restore</Button>
               <input ref={file} type="file" accept="application/json" hidden onChange={async (e) => {
                 const f = e.target.files?.[0]; e.target.value = '';
                 if (!f) return;
                 const r = importData(await f.text());
-                toast(r.ok ? 'Backup restored' : r.error ?? 'Could not restore');
+                toast(!r.ok ? r.error ?? 'Could not restore'
+                  : r.skipped ? `Backup restored. ${r.skipped} damaged item${r.skipped === 1 ? ' was' : 's were'} left out.` : 'Backup restored');
               }} />
               {install ? <Button onClick={async () => { install.prompt(); setInstall(null); }}>Install app</Button> : null}
             </div>

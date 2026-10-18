@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { LuSprout } from 'react-icons/lu';
 import { navigate } from '@/core/router';
 import { createProfile } from '@/core/actions';
+import { startupProblem } from '@/core/store';
 import { DEFAULT_PLACE } from '@/data/places';
 import type { GeoPlace } from '@/types';
 import { Button, Field } from '@/components/ui';
@@ -26,6 +27,7 @@ export function Welcome() {
             <p className="sub">For healthier farms, stronger communities, and a sustainable future.</p>
             <div className="hills" aria-hidden="true" />
           </div>
+          {startupProblem ? <div className="alert orange" role="alert" style={{ marginTop: 14, textAlign: 'left' }}><div className="grow small">{startupProblem}</div></div> : null}
           <div className="splash-actions">
             <Button block onClick={() => setMode('signup')}>Get Started</Button>
             <Button block variant="secondary" onClick={() => setMode('login')}>Log in</Button>

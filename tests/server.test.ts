@@ -1,0 +1,74 @@
+import { afterAll, describe, expect, test } from 'bun:test';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { call, sleep, startServer } from './support/server';
+
+/** Small server safety fixes from the October 2026 review: static files, broken addresses, chat data file, picture errors. */
+
+declare const Bun: {
+  serve(o: { port: number; hostname: string; fetch(req: Request): Response | Promise<Response> }): { port: number; stop(force?: boolean): void };
+};
+
+describe('static files', () => {
+  test('a folder next to dist (like dist-old) cannot be read, and a broken %-code is a bad request', async () => {
+    const srv = await startServer({});
+    try {
+      expect((await fetch(`${srv.url}/..%2Fdist-old%2Fsecret.txt`)).status).toBe(403);
+      expect((await fetch(`${srv.url}/..%2F.env`)).status).toBe(403);
+      expect((await fetch(`${srv.url}/%E0%A4%A`)).status).toBe(400);
+      expect(srv.log()).not.toContain('URIError'); // answered, not crashed into the 500 handler
+    } finally {
+      srv.stop();
+    }
+  });
+});
+
+describe('chat data file', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'may-ani-chat-'));
+  afterAll(() => rmSync(dir, { recursive: true, force: true }));
+
+  test('a damaged file is moved aside, never overwritten, and new chat data is saved whole', async () => {
+    writeFileSync(join(dir, 'data.json'), '{"users":{"u1":{"id":"u1"');
+    const srv = await startServer({}, dir);
+    try {
+      const aside = readdirSync(dir).filter((f) => f.startsWith('data.json.damaged-'));
+      expect(aside.length).toBe(1);
+      expect(readFileSync(join(dir, aside[0]), 'utf8')).toBe('{"users":{"u1":{"id":"u1"');
+      expect(srv.log()).toContain('could not be read');
+
+      const r = await call(srv, 'POST', '/api/chat/register', { id: 'farmer-1', name: 'Juan', role: 'farmer' });
+      expect(r.status).toBe(200);
+      await sleep(1200); // saves are grouped for half a second
+      const saved = JSON.parse(readFileSync(join(dir, 'data.json'), 'utf8'));
+      expect(saved.users['farmer-1'].name).toBe('Juan');
+      expect(existsSync(join(dir, 'data.json.tmp'))).toBe(false);
+    } finally {
+      srv.stop();
+    }
+  });
+});
+
+describe('picture errors', () => {
+  const fake = Bun.serve({
+    port: 0, hostname: '127.0.0.1',
+    fetch: () => Response.json({ error: { message: 'API key of project 4711 (owner@example.test) is not valid' } }, { status: 400 }),
+  });
+  afterAll(() => fake.stop(true));
+
+  test("the provider's own words stay in the server log", async () => {
+    const srv = await startServer({ GEMINI_API_KEY: 'test-not-a-real-key', GEMINI_BASE_URL: `http://127.0.0.1:${fake.port}` });
+    try {
+      const r = await call(srv, 'POST', '/api/ai/render', {
+        prompt: 'A raised vegetable bed made of coco lumber on the open ground in this photo, realistic.',
+        image: { mediaType: 'image/jpeg', data: '/9j/' + 'A'.repeat(400) },
+      });
+      expect(r.status).toBe(502);
+      expect(r.body.error).toContain('error 400');
+      expect(r.body.error).not.toContain('4711');
+      expect(srv.log()).toContain('4711');
+    } finally {
+      srv.stop();
+    }
+  });
+});

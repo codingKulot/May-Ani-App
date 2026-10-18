@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { Router, navigate, useHash, type RouteDef } from '@/core/router';
-import { getState, useAppState } from '@/core/store';
+import { askToKeepData, getState, useAppState } from '@/core/store';
 import { unlinkAccount } from '@/core/actions';
 import { checkSession, clearSession } from '@/services/auth';
 import { startSync } from '@/services/sync';
@@ -21,6 +21,7 @@ import { Settings } from '@/pages/Settings';
 import { Account } from '@/pages/Account';
 import { ResetPassword } from '@/pages/ResetPassword';
 import { Empty, LinkButton, toast } from '@/components/ui';
+import { ErrorBoundary } from '@/components/ErrorBoundary';
 
 /**
  * Route table. To add a page: write it in src/pages, add one line here and one NAV entry in core/nav.ts.
@@ -73,15 +74,23 @@ export function App() {
     startSync({ onLoginEnded: () => toast('Your login has ended. Your data is still here. Log in again in Settings.') });
   }, []);
 
+  // Once someone uses the app, ask the browser not to clear its data when space runs low.
+  useEffect(() => {
+    if (profile) void askToKeepData();
+  }, [!!profile]);
+
   // The link in a "reset your password" email: works on any phone, with or without a profile, outside the usual menus.
   if (path === '/reset') return <ResetPassword token={query.token} />;
   if (!profile) return <Welcome />;
   return (
     <Shell>
-      <Router
-        routes={routes}
-        notFound={<div className="page narrow"><Empty icon="🧭" title="We couldn't find that page" action={<LinkButton to="/">Back to dashboard</LinkButton>} /></div>}
-      />
+      {/* A crash in one page keeps the menu usable; opening another page (a new path) tries again. */}
+      <ErrorBoundary resetKey={path}>
+        <Router
+          routes={routes}
+          notFound={<div className="page narrow"><Empty icon="🧭" title="We couldn't find that page" action={<LinkButton to="/">Back to dashboard</LinkButton>} /></div>}
+        />
+      </ErrorBoundary>
     </Shell>
   );
 }
