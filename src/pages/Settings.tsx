@@ -8,7 +8,7 @@ import { placeLabel } from '@/data/places';
 import { ApiError, serverStatus, type ServerStatus } from '@/services/ai';
 import { clearSession, saveAccountProfile } from '@/services/auth';
 import type { Profile } from '@/types';
-import { Alert, Badge, Button, Card, Chips, Field, LinkButton, PageHeader, toast } from '@/components/ui';
+import { Alert, Badge, Button, Card, Chips, Field, LinkButton, PageHeader, askConfirm, toast } from '@/components/ui';
 import { PlaceSelect } from '@/components/widgets';
 import { LogOutButton } from '@/components/AuthForms';
 import { SyncStatusPanel } from '@/components/SyncStatus';
@@ -104,7 +104,10 @@ export function Settings() {
               <Alert tone="orange" title="Older data that could not be read" action={
                 <div className="row wrap" style={{ marginTop: 8 }}>
                   <Button size="sm" variant="secondary" onClick={() => saveFile(`may-ani-damaged-data-${isoDate()}.json`, damaged, 'application/json')}>Download it</Button>
-                  <Button size="sm" variant="ghost" onClick={() => { if (confirm('Delete the copy of the data that could not be read? This cannot be undone.')) { forgetDamagedCopy(); setDamaged(null); } }}>Delete it</Button>
+                  <Button size="sm" variant="ghost" onClick={async () => {
+                    if (!(await askConfirm({ title: 'Delete the copy that could not be read?', message: 'Download it first if you may need it. This cannot be undone.', ok: 'Delete it', danger: true }))) return;
+                    forgetDamagedCopy(); setDamaged(null);
+                  }}>Delete it</Button>
                 </div>
               }>
                 At one start-up May-Ani could not read the data saved on this phone, so it kept a copy. Download it before deleting it: someone who knows computers may be able to repair it, and parts of it can be restored as a backup.
@@ -122,7 +125,16 @@ export function Settings() {
               }} />
               {install ? <Button onClick={async () => { install.prompt(); setInstall(null); }}>Install app</Button> : null}
             </div>
-            <Button variant="danger" disabled={!hasData} onClick={() => { if (confirm(p.account ? 'Delete ALL data on this device and log out? This cannot be undone on this device. Your online account and the farm data saved in it are not deleted: log in again to get them back.' :'Delete ALL data on this device? This cannot be undone.')) { wipeAllData(); location.hash = '#/welcome'; } }}>Delete all my data</Button>
+            <Button variant="danger" disabled={!hasData} onClick={async () => {
+              if (!(await askConfirm({
+                title: p.account ? 'Delete all data on this phone and log out?' : 'Delete all data on this phone?',
+                message: p.account
+                  ? 'This cannot be undone on this phone. Your online account and the farm data saved in it are not deleted: log in again to get them back.'
+                  : 'Your farms, plans and records are only on this phone, so they will be gone for good. Download a backup first if you may need them.',
+                ok: 'Delete everything', danger: true,
+              }))) return;
+              wipeAllData(); location.hash = '#/welcome';
+            }}>Delete all my data</Button>
           </div>
         </Card>
 

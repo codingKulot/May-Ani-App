@@ -10,7 +10,7 @@ import { addDays, isoDate, num, peso, peso2, prettyDate, sum } from '@/lib/forma
 import { toCsv } from '@/lib/csv';
 import { saveFile } from '@/lib/download';
 import type { ExpenseCategory } from '@/types';
-import { Badge, Button, Card, Empty, Field, NumberInput, PageHeader, Progress, Sheet, Stat, Tabs, toast } from '@/components/ui';
+import { Badge, Button, Card, Empty, Field, NumberInput, PageHeader, Progress, Sheet, Stat, Tabs, askConfirm, toast } from '@/components/ui';
 import { Donut } from '@/components/widgets';
 
 type Tab = 'tasks' | 'expenses' | 'sales' | 'production' | 'reports';
@@ -24,6 +24,10 @@ const CATS: ExpenseCategory[] = ['Seeds', 'Fertilizer', 'Feed', 'Tools', 'Labor'
 const BIG_AMOUNT = 1_000_000; // pesos in one expense
 const BIG_KG = 100_000; // kilos in one sale or harvest (100 tonnes)
 const PRICE_TIMES_USUAL = 5; // a price per kg this many times the usual farm-gate price
+
+/** "Is this right?" for a number that is unusually big. True means save it as typed. */
+const askTypo = (title: string, typed: string) =>
+  askConfirm({ title, message: `${typed}\nCheck that there is no extra zero.`, ok: 'Yes, save it', cancel: 'Let me fix it' });
 
 /** The problem with a date from a date box, or '' when it is fine. `past`: it must be today or earlier (a sale, a cost). */
 function dateProblem(date: string, past = false): string {
@@ -147,10 +151,10 @@ function ExpenseSheet({ open, onClose, farmId }: { open: boolean; onClose: () =>
         <Field label="Amount (₱)" htmlFor="ea" hint={amount > 0 ? `= ${peso2(amount)}` : undefined}><NumberInput id="ea" value={amount} min={0} onChange={setAmount} /></Field>
         <Field label="Note (optional)" htmlFor="en"><input id="en" className="input" value={note} onChange={(e) => setNote(e.target.value)} /></Field>
         <Field label="Date" htmlFor="ed"><input id="ed" type="date" className="input" max={isoDate()} value={date} onChange={(e) => setDate(e.target.value)} /></Field>
-        <Button block onClick={() => {
+        <Button block onClick={async () => {
           if (!(amount > 0)) return toast('Enter an amount');
           if (dateProblem(date, true)) return toast(dateProblem(date, true));
-          if (amount >= BIG_AMOUNT && !confirm(`Save an expense of ${peso2(amount)}? Check that there is no extra zero.`)) return;
+          if (amount >= BIG_AMOUNT && !(await askTypo('Is this amount right?', `You typed ${peso2(amount)} for one expense.`))) return;
           addExpense({ category, amount, note: note.trim(), date, farmId }); setAmount(0); setNote(''); onClose(); toast('Expense added');
         }}>Save expense</Button>
       </div>
@@ -190,7 +194,7 @@ function SaleSheet({ open, onClose, farmId }: { open: boolean; onClose: () => vo
   const [price, setPrice] = useState(0);
   const [buyer, setBuyer] = useState('');
   const [date, setDate] = useState(isoDate());
-  const save = () => {
+  const save = async () => {
     if (!(kg > 0 && price > 0)) return toast('Enter kilos and price');
     if (dateProblem(date, true)) return toast(dateProblem(date, true));
     const item = catalogById(itemId);
@@ -199,7 +203,7 @@ function SaleSheet({ open, onClose, farmId }: { open: boolean; onClose: () => vo
       kg >= BIG_KG ? `${num(kg)} kg sold` : '',
       usual > 0 && price > usual * PRICE_TIMES_USUAL ? `${peso2(price)} per kg (usually about ${peso(usual)} at the farm gate)` : '',
     ].filter(Boolean);
-    if (odd.length && !confirm(`Please check: ${odd.join(' and ')}. Save this sale of ${peso2(kg * price)} anyway?`)) return;
+    if (odd.length && !(await askTypo('Please check this sale', `You typed ${odd.join(' and ')}.\nTotal: ${peso2(kg * price)}.`))) return;
     addSale({ itemId, kg, pricePerKg: price, buyer: buyer.trim() || undefined, date, farmId });
     setKg(0); setPrice(0); setBuyer(''); setDate(isoDate()); onClose(); toast('Sale recorded');
   };
@@ -259,9 +263,9 @@ function Production() {
         {harvest ? (
           <div className="stack">
             <Field label="Kilos harvested" htmlFor="hk"><NumberInput id="hk" value={harvest.kg} min={0} onChange={(kg) => setHarvest({ ...harvest, kg })} /></Field>
-            <Button block onClick={() => {
+            <Button block onClick={async () => {
               if (!(harvest.kg > 0)) return toast('Enter the kilos');
-              if (harvest.kg >= BIG_KG && !confirm(`Save a harvest of ${num(harvest.kg)} kg? Check that there is no extra zero.`)) return;
+              if (harvest.kg >= BIG_KG && !(await askTypo('Is this harvest right?', `You typed ${num(harvest.kg)} kg.`))) return;
               recordHarvest(harvest.id, harvest.kg); setHarvest(null); toast('Harvest recorded');
             }}>Save harvest</Button>
           </div>

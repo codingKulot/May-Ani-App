@@ -166,17 +166,55 @@ export function Empty(p: { icon?: ReactNode; title: string; children?: ReactNode
 
 export const Spinner = () => <span className="spinner" role="status" aria-label="Loading" />;
 
-export function Sheet(p: { open: boolean; onClose: () => void; title: string; children?: ReactNode }) {
+// ---------- dialogs ----------
+/** Dialogs open right now, newest last: only the top one answers Escape and keeps Tab inside (a confirm can open over a form). */
+const openSheets: symbol[] = [];
+const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+/** Keeps Tab and Shift+Tab inside the dialog, so keyboard users cannot wander into the page behind it. */
+function keepTabInside(e: KeyboardEvent, box: HTMLElement) {
+  const items = [...box.querySelectorAll<HTMLElement>(FOCUSABLE)].filter((el) => el.offsetParent !== null);
+  if (!items.length) { e.preventDefault(); return; }
+  const first = items[0];
+  const last = items[items.length - 1];
+  const at = document.activeElement;
+  if (e.shiftKey && (at === first || at === box)) { e.preventDefault(); last.focus(); }
+  else if (!e.shiftKey && (at === last || !box.contains(at))) { e.preventDefault(); first.focus(); }
+}
+
+/**
+ * A dialog: a sheet from the bottom on phones, a centered box on bigger screens (centered on the page content, beside the
+ * sidebar, on desktop: see .sheet-backdrop in styles.css). Escape, the X and a tap outside close it. While open, the page
+ * behind does not scroll; focus moves into the dialog and goes back to where it was afterwards.
+ */
+export function Sheet(p: { open: boolean; onClose: () => void; title: string; children?: ReactNode; size?: 'sm'; alert?: boolean }) {
+  const box = useRef<HTMLDivElement | null>(null);
+  const onClose = useRef(p.onClose);
+  onClose.current = p.onClose;
   useEffect(() => {
     if (!p.open) return;
-    const onKey = (e: { key: string }) => e.key === 'Escape' && p.onClose();
-    window.addEventListener('keydown', onKey as any);
-    return () => window.removeEventListener('keydown', onKey as any);
+    const me = Symbol('dialog');
+    openSheets.push(me);
+    const before = document.activeElement as HTMLElement | null;
+    document.body.classList.add('sheet-open');
+    box.current?.focus({ preventScroll: true });
+    const onKey = (e: KeyboardEvent) => {
+      if (openSheets[openSheets.length - 1] !== me) return;
+      if (e.key === 'Escape') { e.preventDefault(); onClose.current(); }
+      else if (e.key === 'Tab' && box.current) keepTabInside(e, box.current);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      openSheets.splice(openSheets.indexOf(me), 1);
+      if (!openSheets.length) document.body.classList.remove('sheet-open');
+      if (before && document.contains(before)) before.focus({ preventScroll: true });
+    };
   }, [p.open]);
   if (!p.open) return null;
   return (
     <div className="sheet-backdrop" onClick={p.onClose}>
-      <div className="sheet" role="dialog" aria-modal="true" aria-label={p.title} onClick={(e) => e.stopPropagation()}>
+      <div ref={box} tabIndex={-1} className={`sheet ${p.size === 'sm' ? 'small' : ''}`} role={p.alert ? 'alertdialog' : 'dialog'} aria-modal="true" aria-label={p.title} onClick={(e) => e.stopPropagation()}>
         <div className="row between">
           <h2>{p.title}</h2>
           <button className="icon-btn" aria-label="Close" onClick={p.onClose}><LuX size={20} /></button>
@@ -184,6 +222,54 @@ export function Sheet(p: { open: boolean; onClose: () => void; title: string; ch
         {p.children}
       </div>
     </div>
+  );
+}
+
+/** A yes/no question for askConfirm. `message` may contain line breaks (\n). */
+export interface ConfirmOptions { title: string; message?: string; ok: string; cancel?: string; danger?: boolean }
+
+let showConfirm: ((o: ConfirmOptions, answer: (yes: boolean) => void) => void) | null = null;
+
+/**
+ * Asks a yes/no question in the app's own dialog (instead of the browser's confirm(), which shows "localhost says" at the top
+ * of the window and cannot be styled). True for the OK button; false for Cancel, the X, Escape or a tap outside.
+ */
+export function askConfirm(o: ConfirmOptions): Promise<boolean> {
+  return new Promise((resolve) => {
+    if (showConfirm) showConfirm(o, resolve);
+    else resolve(window.confirm([o.title, o.message].filter(Boolean).join('\n\n'))); // ConfirmHost not on screen (should not happen)
+  });
+}
+
+/** Shows askConfirm's questions. Rendered once, in App, so it works on every screen (also Welcome, without the sidebar). */
+export function ConfirmHost() {
+  const [q, setQ] = useState<ConfirmOptions | null>(null);
+  const answer = useRef<((yes: boolean) => void) | null>(null);
+  useEffect(() => {
+    showConfirm = (o, done) => {
+      answer.current?.(false); // a newer question replaces an unanswered one
+      answer.current = done;
+      setQ(o);
+    };
+    return () => { showConfirm = null; };
+  }, []);
+  const reply = (yes: boolean) => {
+    answer.current?.(yes);
+    answer.current = null;
+    setQ(null);
+  };
+  return (
+    <Sheet open={!!q} onClose={() => reply(false)} title={q?.title ?? ''} size="sm" alert>
+      {q ? (
+        <div className="stack">
+          {q.message ? <p className="confirm-text">{q.message}</p> : null}
+          <div className="confirm-actions">
+            <Button variant="secondary" onClick={() => reply(false)}>{q.cancel ?? 'Cancel'}</Button>
+            <Button variant={q.danger ? 'danger' : 'primary'} onClick={() => reply(true)}>{q.ok}</Button>
+          </div>
+        </div>
+      ) : null}
+    </Sheet>
   );
 }
 

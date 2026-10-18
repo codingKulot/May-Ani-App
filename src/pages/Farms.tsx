@@ -8,7 +8,7 @@ import { SECTOR_LABEL, catalogById, itemsFor } from '@/data/catalog';
 import { isoDate, peso, sum } from '@/lib/format';
 import { TENURE_LABEL, WATER_LABEL, areaFieldLabel, checkFarmForm, toSqm, type FarmFormErrors, type FarmFormInput, type FarmLine } from '@/services/farmForm';
 import type { LandTenure, Sector, WaterSource } from '@/types';
-import { Badge, Button, Card, Chips, Empty, Field, LinkButton, NumberInput, PageHeader, Sheet, Stat, toast } from '@/components/ui';
+import { Badge, Button, Card, Chips, Empty, Field, LinkButton, NumberInput, PageHeader, Sheet, Stat, askConfirm, toast } from '@/components/ui';
 import { PlaceSelect } from '@/components/widgets';
 
 const areaLabel = (sqm: number) => (sqm >= 10000 ? `${(sqm / 10000).toFixed(2)} ha` : `${sqm} sqm`);
@@ -159,7 +159,14 @@ export function FarmDetail({ id }: { id: string }) {
         sub={`${SECTOR_LABEL[farm.sector]} · ${areaLabel(farm.areaSqm)} · ${farm.barangay ? `${farm.barangay}, ` : ''}${placeLabel(farm.location)}`}
         actions={<>
           {s.activeFarmId !== id ? <Button size="sm" variant="secondary" onClick={() => { setActiveFarm(id); toast('Set as active farm'); }}>Make active</Button> : <Badge>Active</Badge>}
-          <Button size="sm" variant="danger" title="Delete farm" onClick={() => { if (confirm(`Delete "${farm.name}" and all its records?`)) { removeFarm(id); navigate('/farms'); } }}><LuTrash2 size={14} /></Button>
+          <Button size="sm" variant="danger" title="Delete farm" onClick={async () => {
+            if (!(await askConfirm({
+              title: `Delete "${farm.name}"?`,
+              message: 'Its tasks, expenses, sales and production records are deleted too. Plans made for it are kept. This cannot be undone.',
+              ok: 'Delete farm', danger: true,
+            }))) return;
+            removeFarm(id); navigate('/farms');
+          }}><LuTrash2 size={14} /></Button>
         </>}
       />
       <div className="grid stats" style={{ marginBottom: 14 }}>

@@ -10,7 +10,7 @@ import {
   type Account, type FormErrors,
 } from '@/services/auth';
 import { flushSync, forgetSync, prepareLink, syncNow } from '@/services/sync';
-import { Alert, Button, Chips, Field, Spinner } from '@/components/ui';
+import { Alert, Button, Chips, Field, Spinner, askConfirm } from '@/components/ui';
 import { PlaceSelect } from '@/components/widgets';
 
 /** Sign-up and log-in forms, used by the Welcome screen (no profile yet) and the Account page (guest or local profile). */
@@ -83,8 +83,12 @@ const items = (n: number) => `${n} item${n === 1 ? '' : 's'}`;
 
 /** Both this phone and the account have farm data: keep both (default) or use only the account's. */
 function LinkChoice({ q, onDone }: { q: LinkQuestion; onDone: () => void }) {
-  const useAccount = () => {
-    if (!confirm(`Remove the ${items(q.phoneOnly)} that are only on this phone?\n\nThis cannot be undone. To keep a copy, choose "Keep both" instead, or cancel and back up first in Settings.`)) return;
+  const useAccount = async () => {
+    if (!(await askConfirm({
+      title: `Remove ${items(q.phoneOnly)} from this phone?`,
+      message: 'They are only on this phone, not in your account. This cannot be undone.\nTo keep a copy, choose "Keep both" instead, or cancel and back up first in Settings.',
+      ok: 'Remove them', danger: true,
+    }))) return;
     q.finish('account');
     onDone();
   };
@@ -286,10 +290,18 @@ export function ForgotForm(p: { initialEmail?: string; onBack?: () => void }) {
 export function LogOutButton() {
   const [busy, setBusy] = useState(false);
   const run = async () => {
-    if (!confirm('Log out of May-Ani on this phone?\n\nYour farms, plans and records stay on this phone and in your account. To remove them from this phone too, use "Delete all my data" in Settings.')) return;
+    if (!(await askConfirm({
+      title: 'Log out on this phone?',
+      message: 'Your farms, plans and records stay on this phone and in your account. To remove them from this phone too, use "Delete all my data" in Settings.',
+      ok: 'Log out',
+    }))) return;
     setBusy(true);
     // Send what is still waiting first, so nothing made on this phone is missing from the account.
-    if (!(await flushSync()) && !confirm('Some changes could not be saved to your account yet (no internet, or the server did not answer).\n\nIf you log out now, those changes stay only on this phone. Log out anyway?')) {
+    if (!(await flushSync()) && !(await askConfirm({
+      title: 'Some changes are not in your account yet',
+      message: 'There is no internet, or the server did not answer. If you log out now, those changes stay only on this phone.',
+      ok: 'Log out anyway', cancel: 'Stay logged in', danger: true,
+    }))) {
       setBusy(false);
       return;
     }

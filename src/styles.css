@@ -71,14 +71,29 @@ img, svg { max-width: 100%; }
 }
 .bottom-nav .active { color: var(--green-800); font-weight: 600; }
 
+/* Dialogs (Sheet in components/ui.tsx). Phones: a sheet from the bottom. 720px and up: a centered box.
+   960px and up, when the sidebar shows: centered on the page content beside the sidebar, not on the whole window.
+   The dim backdrop still covers everything, sidebar included, so nothing behind can be clicked. */
 .sheet-backdrop { position: fixed; inset: 0; background: rgba(8, 30, 18, 0.45); z-index: 40; display: flex; align-items: flex-end; justify-content: center; }
-.sheet { width: 100%; max-width: 560px; background: var(--card); border-radius: 20px 20px 0 0; padding: 18px 16px calc(18px + var(--safe-bottom)); max-height: 86vh; overflow: auto; }
+.sheet { width: 100%; max-width: 560px; background: var(--card); border-radius: 20px 20px 0 0; padding: 18px 16px calc(18px + var(--safe-bottom)); max-height: 86vh; max-height: 86dvh; overflow: auto; overscroll-behavior: contain; outline: none; }
+.sheet.small { max-width: 440px; }
 .sheet h2 { margin-bottom: 12px; }
-/* Bigger screens: centered dialog instead of a sheet stuck to the bottom edge */
 @media (min-width: 720px) {
   .sheet-backdrop { align-items: center; padding: 24px; }
-  .sheet { border-radius: 20px; padding: 22px 24px; max-height: calc(100vh - 48px); box-shadow: 0 24px 60px rgba(8, 30, 18, 0.25); }
+  .sheet { border-radius: 20px; padding: 22px 24px; max-height: calc(100vh - 48px); max-height: calc(100dvh - 48px); box-shadow: 0 24px 60px rgba(8, 30, 18, 0.25); }
 }
+@media (min-width: 960px) {
+  body:has(.app > .sidebar) .sheet-backdrop { padding-left: calc(var(--sidebar-w) + 24px); }
+}
+/* the page behind an open dialog does not scroll; the reserved scrollbar space stops the page jumping sideways */
+html { scrollbar-gutter: stable; }
+body.sheet-open { overflow: hidden; }
+.confirm-text { white-space: pre-line; color: var(--muted); }
+.confirm-actions { display: flex; flex-wrap: wrap; gap: 10px; justify-content: flex-end; }
+.confirm-actions .btn { flex: 1 1 130px; }
+.confirm-actions .btn.danger { background: var(--red); color: #fff; }
+.confirm-actions .btn.danger:hover { background: #a92a22; }
+@media (min-width: 720px) { .confirm-actions .btn { flex: 0 0 auto; min-width: 110px; } }
 .field-error { font-size: 12px; color: var(--red); }
 .form-section { display: grid; gap: 12px; }
 .form-section + .form-section { border-top: 1px solid var(--border); padding-top: 16px; }
@@ -351,7 +366,10 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 14px; }
 @media (max-width: 560px) { .stepper .s span { display: none; } .stepper .s.on span { display: inline; } }
 
 .toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(var(--bottom-nav-h) + var(--safe-bottom) + 14px); background: #15291d; color: #fff; padding: 10px 16px; border-radius: 12px; z-index: 60; font-size: 14px; box-shadow: var(--shadow); max-width: 90vw; }
-@media (min-width: 960px) { .toast { bottom: 24px; } }
+@media (min-width: 960px) {
+  .toast { bottom: 24px; }
+  body:has(.app > .sidebar) .toast { left: calc(50% + var(--sidebar-w) / 2); } /* centered under the page content, like dialogs */
+}
 .spinner { width: 18px; height: 18px; border-radius: 50%; border: 3px solid var(--green-200); border-top-color: var(--green-800); animation: spin .8s linear infinite; display: inline-block; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 3s; } }

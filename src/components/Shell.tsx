@@ -4,7 +4,7 @@ import { LuEllipsis, LuSprout } from 'react-icons/lu';
 import { MORE_ITEMS, NAV, TABS, isActive } from '@/core/nav';
 import { Link, useHash } from '@/core/router';
 import { useAppState, useSaveProblem } from '@/core/store';
-import { Avatar, Sheet, ToastHost } from './ui';
+import { Avatar, Sheet } from './ui';
 
 export function Brand({ light }: { light?: boolean }) {
   return (
@@ -87,7 +87,6 @@ export function Shell({ children, title }: { children: ReactNode; title?: string
           ))}
         </div>
       </Sheet>
-      <ToastHost />
     </div>
   );
 }

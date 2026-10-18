@@ -6,7 +6,7 @@ import { deletePlan, savePlanAsFarm } from '@/core/actions';
 import { catalogById } from '@/data/catalog';
 import { peso } from '@/lib/format';
 import { ForecastCard } from '@/components/ForecastCard';
-import { Alert, Badge, Button, Card, Empty, LinkButton, Stat, Tabs, toast } from '@/components/ui';
+import { Alert, Badge, Button, Card, Empty, LinkButton, Stat, Tabs, askConfirm, toast } from '@/components/ui';
 import { PlanLayout } from '@/components/PlanLayout';
 import { BuildStudio } from '@/components/build/BuildStudio';
 import { Donut } from '@/components/widgets';
@@ -38,7 +38,10 @@ export function PlanDetail({ id }: { id: string }) {
         <Link to="/planner" className="icon-btn" title="Back to planner"><LuArrowLeft size={20} /></Link>
         <div className="grow"><h1>Your Plan</h1></div>
         <Link to={`/planner?edit=${plan.id}`} className="btn ghost sm"><LuPencil size={14} /> Edit</Link>
-        <Button size="sm" variant="ghost" title="Delete plan" onClick={() => { if (confirm('Delete this plan? This cannot be undone.')) { deletePlan(plan.id); navigate('/farms'); } }}><LuTrash2 size={14} /></Button>
+        <Button size="sm" variant="ghost" title="Delete plan" onClick={async () => {
+          if (!(await askConfirm({ title: 'Delete this plan?', message: 'Its photos and AI pictures on this phone are deleted too. This cannot be undone.', ok: 'Delete plan', danger: true }))) return;
+          deletePlan(plan.id); navigate('/farms');
+        }}><LuTrash2 size={14} /></Button>
       </div>
 
       <Card>

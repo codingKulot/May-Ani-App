@@ -20,7 +20,7 @@ import { Learn } from '@/pages/Learn';
 import { Settings } from '@/pages/Settings';
 import { Account } from '@/pages/Account';
 import { ResetPassword } from '@/pages/ResetPassword';
-import { Empty, LinkButton, toast } from '@/components/ui';
+import { ConfirmHost, Empty, LinkButton, ToastHost, toast } from '@/components/ui';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 
 /**
@@ -80,17 +80,19 @@ export function App() {
   }, [!!profile]);
 
   // The link in a "reset your password" email: works on any phone, with or without a profile, outside the usual menus.
-  if (path === '/reset') return <ResetPassword token={query.token} />;
-  if (!profile) return <Welcome />;
-  return (
-    <Shell>
-      {/* A crash in one page keeps the menu usable; opening another page (a new path) tries again. */}
-      <ErrorBoundary resetKey={path}>
-        <Router
-          routes={routes}
-          notFound={<div className="page narrow"><Empty icon="🧭" title="We couldn't find that page" action={<LinkButton to="/">Back to dashboard</LinkButton>} /></div>}
-        />
-      </ErrorBoundary>
-    </Shell>
-  );
+  const screen = path === '/reset' ? <ResetPassword token={query.token} />
+    : !profile ? <Welcome />
+      : (
+        <Shell>
+          {/* A crash in one page keeps the menu usable; opening another page (a new path) tries again. */}
+          <ErrorBoundary resetKey={path}>
+            <Router
+              routes={routes}
+              notFound={<div className="page narrow"><Empty icon="🧭" title="We couldn't find that page" action={<LinkButton to="/">Back to dashboard</LinkButton>} /></div>}
+            />
+          </ErrorBoundary>
+        </Shell>
+      );
+  // Toasts and yes/no questions work on every screen, also Welcome and the reset page.
+  return <>{screen}<ToastHost /><ConfirmHost /></>;
 }
