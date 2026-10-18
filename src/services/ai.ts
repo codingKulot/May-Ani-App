@@ -203,11 +203,14 @@ export interface DirectoryUser { id: string; name: string; role: string; blurb: 
 export interface ServerMessage { id: string; from: string; to: string; text: string; at: string }
 
 export const chatApi = {
-  /** Registers (or updates) this user. The server returns a private token that authorises later calls. */
-  register: async (u: { id: string; name: string; role: string; blurb: string }) => {
-    const out = await call<{ ok: true; token: string }>('/api/chat/register', { method: 'POST', body: JSON.stringify(u), headers: auth() });
+  /**
+   * Joins (or updates) this user. `session` is the account login, when logged in: the server then answers with the account's
+   * own chat id (the same on every phone). The private token it returns authorises later calls.
+   */
+  register: async (u: { id: string; name: string; role: string; blurb: string; session?: string }) => {
+    const out = await call<{ ok: true; id?: string; token: string }>('/api/chat/register', { method: 'POST', body: JSON.stringify(u), headers: auth() });
     setToken(out.token);
-    return out;
+    return { id: out.id ?? u.id, token: out.token };
   },
   directory: () => call<{ users: DirectoryUser[] }>('/api/chat/directory'),
   history: (userId: string) =>

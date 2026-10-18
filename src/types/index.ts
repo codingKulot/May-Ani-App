@@ -374,6 +374,10 @@ export interface AppState {
   permitSector: PermitSector;
   chats: ChatMessage[];
   contacts: ChatContact[];
+  /** per conversation (contact id): the time of the newest message read on this phone; later messages from them are unread */
+  chatRead: Record<string, string>;
+  /** this phone has joined the chat (opened Community with a server); then new messages are watched on every page */
+  chatJoined?: boolean;
   marketOverrides: Record<string, { retailPerKg?: number; farmGatePerKg?: number }>;
   watchlist: string[];
   healthLog: HealthLogEntry[];

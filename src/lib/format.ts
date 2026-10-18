@@ -55,6 +55,28 @@ export function timeAgo(iso: string, now = Date.now()): string {
   return d === 1 ? 'Yesterday' : `${d}d`;
 }
 
+/** "6:20 PM": the time of a chat message. */
+export const clockTime = (iso: string): string =>
+  new Date(iso).toLocaleTimeString('en-PH', { hour: 'numeric', minute: '2-digit' });
+
+/** "Today", "Yesterday", "October 17" or "October 17, 2025": the separator above a day's chat messages. */
+export function dayLabel(iso: string, now = new Date()): string {
+  const day = isoDate(new Date(iso));
+  if (day === isoDate(now)) return 'Today';
+  if (day === addDays(isoDate(now), -1)) return 'Yesterday';
+  const d = new Date(iso);
+  return d.toLocaleDateString('en-PH', { month: 'long', day: 'numeric', ...(d.getFullYear() === now.getFullYear() ? {} : { year: 'numeric' }) });
+}
+
+/** The time beside a conversation in the chat list: "6:20 PM" today, "Yesterday", then "Oct 17" (with the year when not this year). */
+export function chatListTime(iso: string, now = new Date()): string {
+  const label = dayLabel(iso, now);
+  if (label === 'Today') return clockTime(iso);
+  if (label === 'Yesterday') return label;
+  const d = new Date(iso);
+  return d.toLocaleDateString('en-PH', { month: 'short', day: 'numeric', ...(d.getFullYear() === now.getFullYear() ? {} : { year: 'numeric' }) });
+}
+
 export function greeting(now = new Date()): string {
   const h = now.getHours();
   if (h < 12) return 'Good morning';

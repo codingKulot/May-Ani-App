@@ -336,12 +336,26 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 14px; }
 @media (prefers-reduced-motion: reduce) { .scan .sweep { display: none; } }
 
 .chat-layout { display: grid; gap: 14px; grid-template-columns: 1fr; }
+/* let the columns shrink to the screen: long message previews are cut with "…" instead of widening the page on phones */
+.chat-layout > * { min-width: 0; }
 @media (min-width: 960px) { .chat-layout { grid-template-columns: 340px 1fr; } }
 .thread { display: flex; flex-direction: column; height: min(70vh, 640px); }
 .thread .msgs { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding: 6px 2px; }
-.bubble { max-width: 78%; padding: 9px 13px; border-radius: 16px; background: #eef3ef; align-self: flex-start; word-break: break-word; white-space: pre-wrap; }
-.bubble.me { background: var(--green-800); color: #fff; align-self: flex-end; }
-.bubble time { display: block; font-size: 10px; opacity: .65; margin-top: 2px; }
+/* chat: received messages on the left (light), sent ones on the right (green), like Messenger and Telegram */
+.bubble { max-width: 78%; padding: 8px 12px 6px; border-radius: 16px; background: #eef3ef; color: var(--text); align-self: flex-start; word-break: break-word; white-space: pre-wrap; }
+.bubble.them { border-bottom-left-radius: 4px; }
+.bubble.me { background: var(--green-800); color: #fff; align-self: flex-end; border-bottom-right-radius: 4px; }
+.bubble time { display: block; font-size: 10px; opacity: .7; margin-top: 2px; text-align: right; }
+.day-sep { align-self: center; font-size: 11px; font-weight: 600; color: var(--muted); background: #eef3ef; padding: 3px 10px; border-radius: 999px; margin: 6px 0 2px; }
+/* unread: bold name and preview plus a count, until the conversation is opened */
+.convo-side { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex-shrink: 0; color: var(--faint); }
+.convo.unread .nm { font-weight: 800; color: var(--text); }
+.convo.unread .ms { font-weight: 700; color: var(--text); }
+.convo.unread .convo-side { color: var(--green-800); font-weight: 700; }
+.count, .nav-count { display: inline-flex; align-items: center; justify-content: center; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px; background: var(--green-700); color: #fff; font-size: 11px; font-weight: 700; line-height: 1; }
+.sidebar nav a .nav-count { margin-left: auto; background: #fff; color: var(--green-900); }
+.tab-icon { position: relative; display: inline-flex; }
+.tab-icon .nav-count { position: absolute; top: -6px; left: 14px; min-width: 18px; height: 18px; padding: 0 5px; font-size: 10px; background: var(--red); border: 2px solid var(--card); }
 .convo { display: flex; align-items: center; gap: 12px; padding: 12px 6px; border: 0; background: none; width: 100%; text-align: left; border-bottom: 1px solid var(--border); border-radius: 0; }
 .convo.on { background: var(--green-50); }
 .convo .nm { font-weight: 600; } .convo .ms { color: var(--muted); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

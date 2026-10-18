@@ -590,21 +590,50 @@ async function handleRender(req, res) {
 // ------------------------------------------------------------------ chat
 const streams = new Map(); // userId -> Set<res>
 
+const ACCOUNT_CHAT = 'acct-';
+const ROLES = ['farmer', 'supplier', 'buyer', 'expert'];
+
+/**
+ * Joins the chat and answers { id, token }: the chat identity to use and its chat token.
+ *   * A guest is known by the phone's own id (b.id) plus the chat token the server gave that phone.
+ *   * A logged-in user also sends their account login (b.session). Their chat identity is then "acct-<account id>" on every
+ *     phone, with the account's name and role. The phone's earlier guest chat is moved into the account when the phone proves
+ *     it is its own (the guest's chat token): its messages stay in their conversations and the guest leaves the directory.
+ */
 async function handleRegister(req, res) {
   if (limited(req, 'reg', 20)) return json(res, 429, { error: 'Too many requests.' });
   const b = await readJson(req);
-  const id = str(b.id, 64).replace(/[^\w-]/g, '');
-  const name = str(b.name, 60).trim();
-  if (!id || !name) return json(res, 400, { error: 'id and name are required' });
-  const role = ['farmer', 'supplier', 'buyer', 'expert'].includes(b.role) ? b.role : 'farmer';
-  const existing = db.users[id];
+  const deviceId = str(b.id, 64).replace(/[^\w-]/g, '');
   const token = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
-  if (existing && !(token && safeEq(existing.token, token))) return json(res, 409, { error: 'This user already exists.' });
+  let account = null;
+  if (accounts && typeof b.session === 'string' && b.session) {
+    try { account = await accounts.userForToken(b.session); } catch { /* database unreachable: join as this phone for now */ }
+  }
+  if (!account && deviceId.startsWith(ACCOUNT_CHAT)) return json(res, 400, { error: 'That chat id is for accounts.' });
+  const id = account ? `${ACCOUNT_CHAT}${String(account._id)}` : deviceId;
+  const name = str(account ? account.name : b.name, 60).trim();
+  if (!id || !name) return json(res, 400, { error: 'id and name are required' });
+  const role = ROLES.includes(account ? account.role : b.role) ? (account ? account.role : b.role) : 'farmer';
+  const existing = db.users[id];
+  // A guest id belongs to the phone holding its chat token; an account id to whoever is logged in to the account.
+  if (!account && existing && !(token && safeEq(existing.token, token))) return json(res, 409, { error: 'This user already exists.' });
   const user = existing || { id, token: randomBytes(24).toString('hex'), createdAt: new Date().toISOString() };
   Object.assign(user, { name, role, blurb: str(b.blurb, 140) });
   db.users[id] = user;
+
+  const guest = account && deviceId && deviceId !== id ? db.users[deviceId] : undefined;
+  if (guest && token && safeEq(guest.token, token)) {
+    for (const m of db.messages) {
+      if (m.from === deviceId) m.from = id;
+      if (m.to === deviceId) m.to = id;
+    }
+    db.messages = db.messages.filter((m) => m.from !== m.to); // what the guest sent to this same account
+    delete db.users[deviceId];
+    for (const r of streams.get(deviceId) ?? []) r.end();
+    streams.delete(deviceId);
+  }
   save();
-  json(res, 200, { ok: true, token: user.token });
+  json(res, 200, { ok: true, id, token: user.token });
 }
 
 function handleDirectory(_req, res) {

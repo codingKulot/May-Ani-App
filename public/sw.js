@@ -30,3 +30,19 @@ self.addEventListener('fetch', (e) => {
       .catch(() => caches.match(req).then((hit) => hit || caches.match('./'))),
   );
 });
+
+// Tapping a "new message" notification (src/lib/notify.ts): bring May-Ani to the front and open that conversation.
+self.addEventListener('notificationclick', (e) => {
+  e.notification.close();
+  const hash = (e.notification.data && e.notification.data.hash) || '#/';
+  e.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((list) => {
+      const open = list[0];
+      if (open) {
+        open.postMessage({ type: 'may-ani:open', hash }); // the app changes its own page (main.tsx)
+        return open.focus();
+      }
+      return self.clients.openWindow(`${self.registration.scope}${hash}`);
+    }),
+  );
+});

@@ -17,3 +17,11 @@ if (process.env.NODE_ENV === 'production' && 'serviceWorker' in navigator) {
     navigator.serviceWorker.register('./sw.js').catch(() => { /* PWA is an enhancement, never required */ });
   });
 }
+
+// A tapped notification (public/sw.js) asks the open app to show a page, e.g. the conversation with a new message.
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.addEventListener('message', (e) => {
+    const d = e.data as { type?: string; hash?: string } | null;
+    if (d?.type === 'may-ani:open' && typeof d.hash === 'string' && d.hash.startsWith('#/')) location.hash = d.hash;
+  });
+}

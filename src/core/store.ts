@@ -20,6 +20,7 @@ export const initialState = (): AppState => ({
   permitSector: 'agriculture',
   chats: [],
   contacts: [],
+  chatRead: {},
   marketOverrides: {},
   watchlist: [],
   healthLog: [],

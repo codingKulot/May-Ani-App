@@ -13,7 +13,7 @@ Owner: Ronilo (not a professional developer; explain choices plainly, he is lear
 Bun, React 19, TypeScript strict, own CSS (`src/styles.css`, no Tailwind), custom hash router (`src/core/router.tsx`), custom store (`src/core/store.ts`, `useSyncExternalStore`, localStorage key `may-ani.state.v1`). No `@types/react`: minimal shims are in `src/types/shims.d.ts`.
 - `bun run dev` : app on http://localhost:3000 (finds the server on 8787 automatically)
 - `bun run server` : API + chat server on 8787. `bun run start` builds, then serves everything on http://localhost:8787
-- `bun run typecheck`, `bun test` (319 tests on 18 October 2026, about 30 s; up to 2.5 minutes when the MongoDB end-to-end tests start cold), `bun run build` (output `dist/`; production build: `define` sets `process.env.NODE_ENV` so React's production build and the offline service worker are in it, about 560 KB JS)
+- `bun run typecheck`, `bun test` (327 tests on 18 October 2026, about 30 to 60 s; up to 2.5 minutes when the MongoDB end-to-end tests start cold), `bun run build` (output `dist/`; production build: `define` sets `process.env.NODE_ENV` so React's production build and the offline service worker are in it, about 560 KB JS)
 - Kill processes by port or PID, never `pkill -f` with a pattern that matches its own shell.
 - Version control: git repository since 18 October 2026 (branch `main`, first commit "Baseline"). No GitHub copy yet (`gh` is not installed). `.gitignore` keeps `.env`, `server/data.json*`, `node_modules`, `dist` out. Commit only when the owner asks.
 
@@ -22,6 +22,17 @@ Bun, React 19, TypeScript strict, own CSS (`src/styles.css`, no Tailwind), custo
 - `src/data/*` catalog, diseases, faults, learn, permits, places, `materials.ts` (prices), `recyclables.ts`, `verses.ts` (Dashboard "Verse of the day", KJV, public domain).
 - `src/services/*` planner, weather, forecast, hazards, market, geocode, chat, health, `ai.ts` (client for the server's AI; exports `call` and `ApiError`), `auth.ts` (accounts client; token in its own localStorage key `may-ani.session.v1`, never in app state or backups), `sync/` (farm data that follows the account, see "Account data sync" below), `build/` (see below). Sign-up/log-in forms and the "Forgot your password?" form (`ForgotForm`, shown inside `LogInForm`): `src/components/AuthForms.tsx`.
 - `src/core/*` store, actions, router, hooks. `src/lib/*` format (`parseNumber` reads "1,500" / "₱1,500.50"), geo, image, `photoStore.ts` (IndexedDB for photos and AI pictures), `download.ts` (`saveFile`), `csv.ts` (BOM, formula-safe cells).
+- Chat (18 October 2026, `services/chat.ts`, `pages/Community.tsx`, `/api/chat/*` in `server/index.mjs`, data in `server/data.json`):
+  a logged-in user's chat identity is `acct-<account id>` on every phone (register sends the login as `session`; the server answers
+  `{ id, token }`); a guest's is the phone's profile id. At log-in the phone's guest chat moves into the account (only with that guest's
+  chat token): messages are re-addressed, the guest leaves the directory. Guests may not register `acct-` ids. Why: the owner's test
+  showed a guest that logged in kept chatting as the old guest id, so both "sides" were the same sender, and one account had two entries.
+  The connection is app-wide (`startChat` in App.tsx) but only for phones that opened Community once (`chatJoined`), so nobody is listed
+  without choosing to chat. Unread = messages from them newer than `chatRead[contact]` (per phone, in app state, not synced); bold row
+  + count, total on the Community/Chat menu and in the tab title "(n) May-Ani"; an open, visible conversation is read at once. New
+  message: toast when visible, otherwise a notification via `lib/notify.ts` (service worker `showNotification`, tap opens
+  `#/community?with=<id>` through a postMessage to the app) after the user taps "Alert me of new messages" (https or localhost only).
+  Received bubbles left, sent right, "Today/Yesterday" separators, clock times, "You:" previews.
 - Dialogs (18 October 2026): every popup is `Sheet` (`components/ui.tsx`): a bottom sheet on phones, a centered box from 720px; from 960px, when the sidebar shows, centered on the page content beside it (`body:has(.app > .sidebar) .sheet-backdrop` adds the sidebar width as left padding; the dim backdrop still covers the sidebar). Toasts are centered the same way. Only the top dialog answers Escape and keeps Tab inside; focus returns to where it was; the page behind does not scroll (`body.sheet-open`, `scrollbar-gutter: stable`). Yes/no questions use `await askConfirm({ title, message, ok, cancel?, danger? })`, never the browser's `confirm()` (it cannot be styled or centered). `ToastHost` and `ConfirmHost` render once in `App.tsx`, so they also work on Welcome and the reset page. Checked at 375, 768, 960, 1280 and 1920 px wide.
 - Data safety in the app (built 18 October 2026): `components/ErrorBoundary.tsx` around each page (keyed by path, menu stays usable) and around the whole app (main.tsx), with "Download a backup". The store moves saved data it cannot read to `may-ani.state.damaged` (never overwrites it; Welcome says so, Settings > Your data downloads or deletes it), repairs lists that are not lists, shows a red "NOT saved" banner (Shell, `useSaveProblem`) while saving fails, and asks `navigator.storage.persist()` once there is a profile. Restore (`importData`) brings in only farm data, each item checked with the sync guards (`cleanBackup` in `services/sync/records.ts`); never the profile, login or settings such as the server address. `NumberInput` is a text box (inputMode decimal) that accepts commas and ₱, says "Type a number" under the box, and points out min/max after the box is left.
 - `server/index.mjs` Node/Bun server: Anthropic proxy, image-model proxy, chat (SSE), rate limiting, static files (only inside `dist` + separator; a broken %-code is a 400), `.env` loader. Chat data `server/data.json` is written to `.tmp` then renamed; a file it cannot read is moved to `data.json.damaged-<time>`, never overwritten. Picture-provider error text goes to the server log only. Optional dependencies, each loaded only when switched on: the official `mongodb` driver (`MONGODB_URI`) and `nodemailer` (`SMTP_USER` + `SMTP_PASSWORD`).
@@ -98,7 +109,7 @@ Flow: user adds a site photo (planner photo is reused) -> one button "Analyze my
 5. Only crop plans up to 600 sqm get the build ideas; fish and livestock builds are not covered.
 6. Accounts (built 18 October 2026) run on the owner's **MongoDB Atlas free (M0) cluster**, verified 18 October 2026: server connects, first real account saved in database `may_ani` (scrypt hash, SHA-256 session, TTL index). Atlas only lets in allowed IP addresses: a Philippine home IP can change, and then the server log says MongoDB is not reachable. Fix: Atlas > Network Access > add the current IP.
 7. Password reset by email (built 18 October 2026) is verified only against the fake mail server in tests and a browser check; **real Gmail sending is untested** until the owner adds `SMTP_USER` and `SMTP_PASSWORD`. First real run: check the startup line says `Email: logged in to smtp.gmail.com`, send one reset to the owner's own email, and look in Spam.
-   Accounts gaps: no email verification at sign-up (anyone can sign up with an address they do not own; a reset email would then go to the real owner of that address), chat identity (`/api/chat/*`, `server/data.json`) is still separate from accounts, no email verification.
+   Accounts gaps: no email verification at sign-up (anyone can sign up with an address they do not own; a reset email would then go to the real owner of that address). Chat identity follows the account since 18 October 2026, but chat data still lives in `server/data.json`, not MongoDB.
 8. This PC lacks the full Microsoft Visual C++ runtime, so the test mongod could not start. Working fix for now: the four runtime DLLs (copied from OneDrive's folder) sit next to the binary in `node_modules/.cache/mongodb-memory-server/`. A fresh `node_modules` loses them and the MongoDB tests skip with a message. Proper fix: owner installs the VC++ Redistributable x64.
 9. Account data sync (built 18 October 2026) is verified with a throwaway MongoDB only (tests, and a browser check with three
    "phones" = three site addresses on one PC: data made on one appeared on the others, "Keep both" asked and worked, "Waiting for
@@ -114,9 +125,18 @@ Flow: user adds a site photo (planner photo is reused) -> one button "Analyze my
     Edge at 512 px and shrunk with System.Drawing; remake them the same way if the icon changes.
 11. Review of 18 October 2026: quick wins 1-5, 8, 12, 20, 22, 27, 28 are done; server hardening (daily AI allowance, TRUST_PROXY,
     security headers) done the same day. Still open from that list: hosting with HTTPS, privacy notice and account deletion
-    (RA 10173), email verification, change password / log out everywhere, chat rebuild on accounts (public directory, plain tokens,
-    no block/report), Filipino interface, editing records and undo, units beyond kg, offline weather, reminders, MongoDB backups,
-    browser tests, CI, code splitting.
+    (RA 10173), email verification, change password / log out everywhere, chat: the directory is still public (only phones that
+    opened Community), chat tokens are kept as plain text in data.json and travel in the stream URL, no block/report, no read receipts
+    (ticks), read state is per phone, no notifications while the app is fully closed (needs Web Push), chat data not in MongoDB;
+    Filipino interface, editing records and undo, units beyond kg, offline weather, reminders, MongoDB backups, browser tests, CI,
+    code splitting.
+13. Chat changes of 18 October 2026 are verified by tests (identity, merge, unread rules) and a browser check with simulated second
+    and third users on the safe server (sides, bold + counts, menu and tab-title badges, notice with the sender's name, no notice for
+    the open conversation, phone layout). Not checked: real phone notifications (the preview browser blocks them; needs https or
+    localhost and a tap on "Alert me"), and the guest-to-account merge in a browser (covered by an end-to-end test). The owner's
+    `server/data.json` still holds test users from before the fix (two "May Ani User One" device ids, a "Guest"); each device id
+    merges into the account the next time that browser opens Chat while logged in, or the file can be deleted (server stopped) to
+    start chat fresh.
 12. Hardening limits (18 October 2026): daily counts are in memory (a restart resets them; one server process only). TRUST_PROXY is
     tested with simulated headers only, never behind a real proxy or tunnel. The CSP was checked on the built app (16 pages, no
     blocks; weather, map tiles and the service worker work; an injected script and an outside image were blocked), but with AI

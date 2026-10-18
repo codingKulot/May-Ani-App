@@ -4,6 +4,7 @@ import { LuEllipsis, LuSprout } from 'react-icons/lu';
 import { MORE_ITEMS, NAV, TABS, isActive } from '@/core/nav';
 import { Link, useHash } from '@/core/router';
 import { useAppState, useSaveProblem } from '@/core/store';
+import { totalUnread } from '@/services/chat';
 import { Avatar, Sheet } from './ui';
 
 export function Brand({ light }: { light?: boolean }) {
@@ -16,8 +17,13 @@ export function Brand({ light }: { light?: boolean }) {
 
 export function Shell({ children, title }: { children: ReactNode; title?: string }) {
   const { path } = useHash();
-  const { profile } = useAppState();
+  const state = useAppState();
+  const { profile } = state;
   const saveProblem = useSaveProblem();
+  const unread = totalUnread(state);
+  /** The unread chat count on the Community / Chat menu item. */
+  const countFor = (id: string) => (id === 'community' && unread > 0
+    ? <span className="nav-count" aria-label={`${unread} unread`}>{unread > 99 ? '99+' : unread}</span> : null);
   const [more, setMore] = useState(false);
   const [online, setOnline] = useState(typeof navigator === 'undefined' ? true : navigator.onLine);
 
@@ -39,7 +45,7 @@ export function Shell({ children, title }: { children: ReactNode; title?: string
         <nav>
           {NAV.map((n) => (
             <Link key={n.id} to={n.path} className={isActive(n, path) ? 'active' : ''}>
-              <n.Icon size={19} /> {n.label}
+              <n.Icon size={19} /> {n.label}{countFor(n.id)}
             </Link>
           ))}
         </nav>
@@ -67,7 +73,7 @@ export function Shell({ children, title }: { children: ReactNode; title?: string
           const TabIcon = n.tab!.Icon;
           return (
             <Link key={n.id} to={n.path} className={isActive(n, path) ? 'active' : ''}>
-              <TabIcon size={22} />
+              <span className="tab-icon"><TabIcon size={22} />{countFor(n.id)}</span>
               {n.tab!.label}
             </Link>
           );
