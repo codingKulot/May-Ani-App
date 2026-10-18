@@ -1,0 +1,12 @@
+node_modules
+dist
+# secrets: only .env.example (no real keys) belongs in git
+.env
+.env.*
+!.env.example
+# chat data, its temporary and damaged copies
+server/data.json
+server/data.json.*
+*.log
+# personal Claude Code settings
+.claude/settings.local.json

@@ -1,0 +1,128 @@
+import { useEffect, useRef, useState } from 'react';
+import { LuDownload, LuUpload } from 'react-icons/lu';
+import { useAppState } from '@/core/store';
+import { exportData, hasUserData, importData, unlinkAccount, updateProfile, updateSettings, wipeAllData } from '@/core/actions';
+import { placeLabel } from '@/data/places';
+import { ApiError, serverStatus, type ServerStatus } from '@/services/ai';
+import { clearSession, saveAccountProfile } from '@/services/auth';
+import { isoDate } from '@/lib/format';
+import type { Profile } from '@/types';
+import { Alert, Badge, Button, Card, Chips, Field, LinkButton, PageHeader, toast } from '@/components/ui';
+import { PlaceSelect } from '@/components/widgets';
+import { LogOutButton } from '@/components/AuthForms';
+import { SyncStatusPanel } from '@/components/SyncStatus';
+
+export function Settings() {
+  const s = useAppState();
+  const p = s.profile!;
+  const hasData = hasUserData(s);
+  const [name, setName] = useState(p.name);
+  const [api, setApi] = useState(s.settings.apiBase);
+  const [feed, setFeed] = useState(s.settings.marketFeedUrl);
+  const [status, setStatus] = useState<ServerStatus | null | 'checking'>('checking');
+  const file = useRef<HTMLInputElement | null>(null);
+  const [install, setInstall] = useState<any>(null);
+
+  useEffect(() => { serverStatus(true).then(setStatus); }, [s.settings.apiBase]);
+  useEffect(() => {
+    const h = (e: Event) => { e.preventDefault(); setInstall(e); };
+    window.addEventListener('beforeinstallprompt', h);
+    return () => window.removeEventListener('beforeinstallprompt', h);
+  }, []);
+
+  /** Saves on this phone at once; with an account, also on the server (the phone copy wins if that fails). */
+  const saveProfile = (patch: Partial<Pick<Profile, 'name' | 'role' | 'location'>>) => {
+    updateProfile(patch);
+    if (!p.account) return;
+    saveAccountProfile(patch).catch((e) => {
+      if (e instanceof ApiError && e.status === 401) {
+        clearSession();
+        unlinkAccount();
+        toast('Your login has ended. Saved on this phone; log in again to update your account.');
+      } else {
+        toast('Saved on this phone. Could not update your account right now.');
+      }
+    });
+  };
+
+  const download = () => {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([exportData()], { type: 'application/json' }));
+    a.download = `may-ani-backup-${isoDate()}.json`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
+
+  return (
+    <div className="page narrow">
+      <PageHeader title="Settings" />
+      <div className="stack">
+        <Card title="Account">
+          {p.account ? (
+            <div className="stack sm">
+              <p className="small">Logged in as <strong>{p.account.email}</strong>. Changes to your name, role and location below are saved to your account.</p>
+              <SyncStatusPanel />
+              <div className="row wrap"><LogOutButton /></div>
+            </div>
+          ) : (
+            <div className="stack sm">
+              <p className="small">{p.guest ? 'You are using May-Ani as a guest.' : 'You are not logged in.'} Create an account so your farms, plans and records are saved online and come back when you log in on another phone. Everything on this phone is kept.</p>
+              <div className="row wrap">
+                <LinkButton to="/account?mode=signup">Create account</LinkButton>
+                <LinkButton to="/account?mode=login" variant="secondary">Log in</LinkButton>
+              </div>
+            </div>
+          )}
+        </Card>
+
+        <Card title="Profile">
+          <div className="stack">
+            <Field label="Your name" htmlFor="pn"><input id="pn" className="input" value={name} maxLength={60} onChange={(e) => setName(e.target.value)} onBlur={() => name.trim() && name.trim() !== p.name && saveProfile({ name: name.trim() })} /></Field>
+            <Field label="I am a…"><Chips items={[{ id: 'farmer', label: 'Farmer' }, { id: 'supplier', label: 'Supplier' }, { id: 'buyer', label: 'Buyer' }, { id: 'expert', label: 'Expert' }]} value={p.role} onChange={(role) => saveProfile({ role })} /></Field>
+            <Field label="My location" hint={`Used for weather, hazards and prices. Now: ${placeLabel(p.location)}`}><PlaceSelect value={p.location} onChange={(location) => saveProfile({ location })} /></Field>
+          </div>
+        </Card>
+
+        <Card title="Connections">
+          <div className="stack">
+            <Field label="May-Ani server address" htmlFor="api" hint="Leave blank if the app is served by the May-Ani server. Needed for AI photo analysis and real chat.">
+              <div className="input-group"><input id="api" className="input" value={api} placeholder="https://your-server.example" onChange={(e) => setApi(e.target.value)} />
+                <Button variant="secondary" onClick={() => { updateSettings({ apiBase: api.trim() }); toast('Saved'); }}>Save</Button></div>
+            </Field>
+            <div className="row wrap">
+              {status === 'checking' ? <Badge tone="gray">Checking…</Badge> : status ? <><Badge>Server connected</Badge><Badge tone={status.ai ? 'green' : 'orange'}>AI {status.ai ? 'on' : 'off'}</Badge><Badge tone={status.chat ? 'green' : 'orange'}>Chat {status.chat ? 'on' : 'off'}</Badge><Badge tone={status.accounts ? 'green' : 'orange'}>Accounts {status.accounts ? 'on' : 'off'}</Badge></> : <Badge tone="orange">No server (offline features only)</Badge>}
+              <Button size="sm" variant="ghost" onClick={() => { setStatus('checking'); serverStatus(true).then(setStatus); }}>Check again</Button>
+            </div>
+            <Field label="Market price feed URL" htmlFor="feed" hint="Optional JSON feed of live prices (format in README). Blank = planning estimates.">
+              <div className="input-group"><input id="feed" className="input" value={feed} placeholder="https://…/prices.json" onChange={(e) => setFeed(e.target.value)} />
+                <Button variant="secondary" onClick={() => { updateSettings({ marketFeedUrl: feed.trim() }); toast('Saved'); }}>Save</Button></div>
+            </Field>
+          </div>
+        </Card>
+
+        <Card title="Your data">
+          <div className="stack sm">
+            <p className="small muted">{p.account
+              ? 'Your farms, plans and records are on this device and saved to your account. A backup file is an extra copy you keep yourself (photos are not in it).'
+              : 'Your farms, plans and records are stored on this device only. Download a backup before changing phones, or create an account.'}</p>
+            {hasData ? null : <p className="small muted">Nothing to back up or delete yet. Add a farm, plan or record first. You can still restore a backup file.</p>}
+            <div className="row wrap">
+              <Button variant="secondary" onClick={download} disabled={!hasData}><LuDownload size={16} /> Back up</Button>
+              <Button variant="secondary" onClick={() => file.current?.click()}><LuUpload size={16} /> Restore</Button>
+              <input ref={file} type="file" accept="application/json" hidden onChange={async (e) => {
+                const f = e.target.files?.[0]; e.target.value = '';
+                if (!f) return;
+                const r = importData(await f.text());
+                toast(r.ok ? 'Backup restored' : r.error ?? 'Could not restore');
+              }} />
+              {install ? <Button onClick={async () => { install.prompt(); setInstall(null); }}>Install app</Button> : null}
+            </div>
+            <Button variant="danger" disabled={!hasData} onClick={() => { if (confirm(p.account ? 'Delete ALL data on this device and log out? This cannot be undone on this device. Your online account and the farm data saved in it are not deleted: log in again to get them back.' :'Delete ALL data on this device? This cannot be undone.')) { wipeAllData(); location.hash = '#/welcome'; } }}>Delete all my data</Button>
+          </div>
+        </Card>
+
+        <Alert tone="blue" title="About May-Ani">Plans, prices, fault data and health results are guides to help you decide. They are not professional, legal or veterinary advice. Confirm with your DA, BFAR, LGU or a licensed professional before big decisions.</Alert>
+      </div>
+    </div>
+  );
+}
