@@ -109,16 +109,20 @@ body.sheet-open { overflow: hidden; }
 .sheet-grid a { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 14px 6px; border-radius: var(--radius); background: var(--green-50); color: var(--text); font-size: 13px; text-align: center; text-decoration: none; }
 .sheet-grid a svg { color: var(--green-800); }
 /* bottom of the "More" sheet (phones and tablets): the account name, then Log out under it, like the sidebar on bigger screens */
-/* minmax(0, 1fr): the column may shrink to the screen, so a long email ends with "…" instead of widening the menu */
-.sheet-account { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--border); }
+/* minmax(0, 1fr): the column may shrink to the screen, so a long email ends with "…" instead of widening the menu.
+   justify-items: center: the name block and Log out sit in the middle (owner's layout), on every size that shows this menu. */
+.sheet-account {
+  display: grid; grid-template-columns: minmax(0, 1fr); justify-items: center; gap: 4px;
+  margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--border);
+}
 .sheet-logout {
-  display: flex; align-items: center; gap: 12px; width: 100%; min-height: 48px; padding: 10px 12px; border: 0; border-radius: 12px;
-  background: none; color: var(--text); font: inherit; font-size: 15px; font-weight: 600; text-align: left; cursor: pointer;
+  display: flex; align-items: center; justify-content: center; gap: 12px; max-width: 100%; min-height: 48px; padding: 10px 24px;
+  border: 0; border-radius: 12px; background: none; color: var(--text); font: inherit; font-size: 15px; font-weight: 600; cursor: pointer;
 }
 .sheet-logout svg { color: var(--green-800); }
 .sheet-logout:hover { background: var(--green-50); }
 .sheet-logout:disabled { opacity: .6; cursor: default; }
-.sheet-me { display: flex; align-items: center; gap: 10px; padding: 4px 12px; font-size: 14px; }
+.sheet-me { display: flex; align-items: center; gap: 10px; max-width: 100%; padding: 4px 12px; font-size: 14px; }
 .sheet-me > div { min-width: 0; }
 .sheet-me small { display: block; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* small phones (e.g. 320x568): the bottom sheet may use more of the screen and the tiles are a little tighter, so the name and

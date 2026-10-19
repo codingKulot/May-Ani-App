@@ -25,7 +25,8 @@ offline (the session is checked when online). Server: AI (`/api/ai/*`) and all o
 (`loggedIn()` in `server/index.mjs`: 401 `login`, 503 `accounts_off` / `accounts_down`); sync already did. Without MongoDB nobody can
 log in, and the server log says so. Log out (owner's layout, 19 October 2026): the account name, then a "Log out" item UNDER it, at
 the bottom of the sidebar (960px and up: tablets held sideways, notebooks, laptops, desktops, large screens) and at the bottom of the
-"More" sheet (phones and tablets below 960px). Small phones (max 719px wide and 700px tall) let the sheet use 94dvh with tighter
+"More" sheet (phones and tablets below 960px), where the name block and Log out are CENTERED (owner, 19 October 2026: no empty space
+on one side; `justify-items: center` on `.sheet-account`; the sidebar stays left-aligned like its menu items). Small phones (max 719px wide and 700px tall) let the sheet use 94dvh with tighter
 tiles; sideways phones get a compact 5-column sheet; `.sheet-account` uses `minmax(0, 1fr)` so a long email ends with "…" instead of
 widening the menu. All through `useLogOut()` in `components/AuthForms.tsx` (asks, sends waiting changes, then logs out); the Settings
 button uses it too. Checked with a long name and email at 320x568, 375x812, 412x915, 812x375, 768x1024, 1024x768, 960x540, 1280x720,
