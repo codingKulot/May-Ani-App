@@ -23,11 +23,13 @@ whenever `profile.account` is missing (an old guest profile, or a login that end
 the farm data on the phone is kept and goes into the account at sign-up or log-in (Welcome says so). A logged-in user keeps working
 offline (the session is checked when online). Server: AI (`/api/ai/*`) and all of chat (`/api/chat/*`) need the account login
 (`loggedIn()` in `server/index.mjs`: 401 `login`, 503 `accounts_off` / `accounts_down`); sync already did. Without MongoDB nobody can
-log in, and the server log says so. Log out: the Settings button, a "Log out" item in the sidebar just above the account name
-(desktop, 960px and up) and the same item above the account name at the bottom of the "More" sheet (phones and tablets, below
-960px; a compact 5-column sheet on sideways phones so it fits without scrolling), all through `useLogOut()` in
-`components/AuthForms.tsx` (asks, sends waiting changes, then logs out). Checked at 320x568, 375x812, 812x375, 768x1024, 959x700,
-960x540 and 1920x1080.
+log in, and the server log says so. Log out (owner's layout, 19 October 2026): the account name, then a "Log out" item UNDER it, at
+the bottom of the sidebar (960px and up: tablets held sideways, notebooks, laptops, desktops, large screens) and at the bottom of the
+"More" sheet (phones and tablets below 960px). Small phones (max 719px wide and 700px tall) let the sheet use 94dvh with tighter
+tiles; sideways phones get a compact 5-column sheet; `.sheet-account` uses `minmax(0, 1fr)` so a long email ends with "…" instead of
+widening the menu. All through `useLogOut()` in `components/AuthForms.tsx` (asks, sends waiting changes, then logs out); the Settings
+button uses it too. Checked with a long name and email at 320x568, 375x812, 412x915, 812x375, 768x1024, 1024x768, 960x540, 1280x720,
+1366x768, 1440x900, 1920x1080 and 2560x1440: right order, visible without scrolling, text inside, no sideways scroll.
 Removed: guest mode, the Account page, guest AI limits and the phone id (`X-Device-Id`), sample
 chat contacts, the separate chat token (`may-ani.chatToken` is deleted on connect).
 

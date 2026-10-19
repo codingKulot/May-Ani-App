@@ -51,9 +51,7 @@ export function Shell({ children, title }: { children: ReactNode; title?: string
             </Link>
           ))}
         </nav>
-        <button type="button" className="sidebar-logout" onClick={logOutNow} disabled={loggingOut}>
-          <LuLogOut size={19} /> {loggingOut ? 'Logging out…' : 'Log out'}
-        </button>
+        {/* the account name, then "Log out" under it, at the bottom of the sidebar */}
         <div className="me">
           <Avatar name={profile?.name ?? '?'} />
           <div>
@@ -61,6 +59,9 @@ export function Shell({ children, title }: { children: ReactNode; title?: string
             <small>{profile?.account?.email}</small>
           </div>
         </div>
+        <button type="button" className="sidebar-logout" onClick={logOutNow} disabled={loggingOut}>
+          <LuLogOut size={19} /> {loggingOut ? 'Logging out…' : 'Log out'}
+        </button>
       </aside>
 
       <div className="main">
@@ -97,11 +98,8 @@ export function Shell({ children, title }: { children: ReactNode; title?: string
             </Link>
           ))}
         </div>
-        {/* Phones and tablets have no sidebar: the same "Log out" sits here, just above the account name */}
+        {/* Phones and tablets have no sidebar: the account name, then "Log out" under it, like the sidebar on bigger screens */}
         <div className="sheet-account">
-          <button type="button" className="sheet-logout" onClick={logOutNow} disabled={loggingOut}>
-            <LuLogOut size={20} /> {loggingOut ? 'Logging out…' : 'Log out'}
-          </button>
           <div className="sheet-me">
             <Avatar name={profile?.name ?? '?'} />
             <div>
@@ -109,6 +107,9 @@ export function Shell({ children, title }: { children: ReactNode; title?: string
               <small>{profile?.account?.email}</small>
             </div>
           </div>
+          <button type="button" className="sheet-logout" onClick={logOutNow} disabled={loggingOut}>
+            <LuLogOut size={20} /> {loggingOut ? 'Logging out…' : 'Log out'}
+          </button>
         </div>
       </Sheet>
     </div>
