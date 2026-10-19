@@ -97,7 +97,7 @@ function answerFor(records, since, accepted, lost) {
  * Builds the /api/sync handler. `store` is the accounts store from auth.mjs (userForToken, loadAppData, saveAppData).
  * `helpers` are the server's own json/readJson/limited functions.
  */
-export function syncRoutes(store, { json, readJson, limited }, { perMinute = 120, dbProblem = () => '' } = {}) {
+export function syncRoutes(store, { json, readJson, limited, log = console }, { perMinute = 120, dbProblem = () => '' } = {}) {
   async function sync(req, res) {
     if (limited(req, 'sync', perMinute)) return json(res, 429, { error: 'Too many saves in a minute. Please wait a little.' });
     const user = await store.userForToken((req.headers.authorization || '').replace(/^Bearer\s+/i, '').trim());
@@ -116,6 +116,14 @@ export function syncRoutes(store, { json, readJson, limited }, { perMinute = 120
     } catch (e) {
       if (!e.status) throw e;
       return json(res, e.status, { error: e.message, ...(e.tooBig ? { code: 'too_big', limit: SYNC_MAX_BYTES } : {}) });
+    }
+
+    // Most syncs (every few minutes, at app start, on return to the app) bring nothing and find nothing new. Then only the
+    // save number is read, not the whole farm data document (up to SYNC_MAX_BYTES).
+    if (changes.length === 0) {
+      const head = await store.appDataHead(user._id);
+      const rev = head?.rev ?? 0;
+      if (since === rev) return json(res, 200, { rev, records: [], bytes: head?.bytes ?? 0, limit: SYNC_MAX_BYTES });
     }
 
     for (let attempt = 0; attempt < SAVE_TRIES; attempt++) {
@@ -149,7 +157,7 @@ export function syncRoutes(store, { json, readJson, limited }, { perMinute = 120
     } catch (e) {
       const problem = dbProblem(e);
       if (!problem) throw e;
-      console.error(`Sync: ${problem} (${e.message})`);
+      log.error(`Sync: ${problem} (${e.message})`);
       if (!res.headersSent) json(res, 503, { error: 'The account database cannot be reached right now. Your changes are safe on this phone.' });
     }
   };

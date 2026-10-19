@@ -5,7 +5,7 @@ import { isValidQuad, type Quad } from '@/services/build/geometry';
 import { sessionToken } from './auth'; // auth.ts imports this file too; sessionToken is only read when a call is made, so that is fine
 
 /**
- * Client for the optional May-Ani server (server/index.mjs). The server holds the Anthropic API key,
+ * Client for the optional May-Ani server (server/, see docs/ARCHITECTURE.md). The server holds the Anthropic API key,
  * so no secret ever ships to the browser. Every feature degrades gracefully when it is unreachable.
  */
 
@@ -82,7 +82,7 @@ export async function serverStatus(force = false): Promise<ServerStatus | null> 
   return value;
 }
 
-/** What a health photo shows, as the AI judged it. Keep in sync with PHOTO_SUBJECTS in server/index.mjs (tests/health-ai.test.ts checks). */
+/** What a health photo shows, as the AI judged it. Keep in sync with PHOTO_SUBJECTS in server/shared.mjs (tests/health-ai.test.ts checks). */
 export const PHOTO_SUBJECTS = ['plant', 'animal', 'fish', 'farm', 'other', 'unclear'] as const;
 export type PhotoSubject = (typeof PHOTO_SUBJECTS)[number];
 
@@ -178,7 +178,7 @@ export async function aiRenderPicture(image: ImagePayload, prompt: string): Prom
 export interface DirectoryUser { id: string; name: string; role: string; blurb: string }
 export interface ServerMessage { id: string; from: string; to: string; text: string; at: string }
 
-/** Chat on the server (server/index.mjs). Every call carries the account login: only logged-in users can chat. */
+/** Chat on the server (server/chat.mjs). Every call carries the account login: only logged-in users can chat. */
 export const chatApi = {
   /** Joins (or updates) the logged-in user. The server answers with their chat id, the same on every phone. */
   register: async (u: { blurb: string }) =>

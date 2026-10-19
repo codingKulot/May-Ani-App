@@ -9,7 +9,9 @@
 //     logs the account out on every phone. It does not log in: the person then logs in with the new password.
 // The database part is in server/auth.mjs (collection password_resets), the sending in server/mail.mjs.
 
+import { createHash } from 'node:crypto';
 import { dbProblem, hashPassword, normalizeEmail, passwordProblem, validEmail } from './auth.mjs';
+import { memoryCounters } from './limits.mjs';
 import { mailProblem } from './mail.mjs';
 
 export const RESET_MINUTES = 30;
@@ -72,17 +74,13 @@ export function changedEmail(name) {
  * `mailer` is from server/mail.mjs (null = email is off), `appUrl` is where the app runs (APP_URL), `unlock(email)` ends
  * a wrong-password lockout. `forgotPerMinute` and `resetPerMinute` are per-IP limits.
  */
-export function resetRoutes(store, { json, readJson, limited }, { mailer, appUrl, unlock = () => {}, forgotPerMinute = 5, resetPerMinute = 20 }) {
-  const asks = new Map(); // email -> { n, start }
-  setInterval(() => { const now = Date.now(); for (const [k, v] of asks) if (now - v.start > PER_EMAIL_MS) asks.delete(k); }, 60_000).unref();
-  /** Counted for every address, with or without an account, so the limit does not tell which emails have accounts. */
-  const askedTooOften = (email) => {
-    const now = Date.now();
-    const a = asks.get(email);
-    if (!a || now - a.start > PER_EMAIL_MS) { asks.set(email, { n: 1, start: now }); return false; }
-    a.n++;
-    return a.n > PER_EMAIL;
-  };
+export function resetRoutes(store, { json, readJson, limited, log = console }, { mailer, appUrl, unlock = async () => {}, forgotPerMinute = 5, resetPerMinute = 20, counters = memoryCounters() }) {
+  /**
+   * Counted for every address, with or without an account, so the limit does not tell which emails have accounts. Kept in
+   * `counters` (MongoDB: the same for every copy of the server) under a hash of the email, never the address itself.
+   */
+  const askedTooOften = async (email) =>
+    (await counters.add(`forgot:${createHash('sha256').update(email).digest('hex')}`, { ttlMs: PER_EMAIL_MS })) > PER_EMAIL;
   const tooMany = (res) => json(res, 429, { error: 'Too many tries. Please wait a minute and try again.' });
 
   async function sendLink(user) {
@@ -101,13 +99,13 @@ export function resetRoutes(store, { json, readJson, limited }, { mailer, appUrl
     const email = normalizeEmail(b.email);
     if (!validEmail(email)) return json(res, 400, { error: 'Enter a valid email address, like juan@gmail.com.', field: 'email' });
     if (!mailer) return json(res, 503, { error: OFF_MESSAGE });
-    if (askedTooOften(email)) {
+    if (await askedTooOften(email)) {
       return json(res, 429, { error: 'A reset link was asked for this email several times already. Check your Spam folder, or wait an hour and try again.' });
     }
     const user = await store.findUserByEmail(email);
     json(res, 200, { ok: true, message: SENT_MESSAGE });
     if (user) {
-      sendLink(user).catch((e) => console.error(`Email: a password reset email could not be sent. ${dbProblem(e) || mailProblem(e, mailer.port)}`));
+      sendLink(user).catch((e) => log.error(`Email: a password reset email could not be sent. ${dbProblem(e) || mailProblem(e, mailer.port)}`));
     }
   }
 
@@ -120,10 +118,10 @@ export function resetRoutes(store, { json, readJson, limited }, { mailer, appUrl
     const problem = passwordProblem(b.password, user.email);
     if (problem) return json(res, 400, { error: problem, field: 'password' }); // the link still works for a better password
     if (!(await store.resetPassword(token, user._id, await hashPassword(b.password)))) return json(res, 400, { error: LINK_GONE, field: 'token' });
-    unlock(user.email);
+    await unlock(user.email);
     json(res, 200, { ok: true, email: user.email });
     mailer?.send({ to: user.email, ...changedEmail(user.name) })
-      .catch((e) => console.error(`Email: the "password changed" email could not be sent. ${mailProblem(e, mailer.port)}`));
+      .catch((e) => log.error(`Email: the "password changed" email could not be sent. ${mailProblem(e, mailer.port)}`));
   }
 
   return { 'POST /api/auth/forgot': forgot, 'POST /api/auth/reset': reset };

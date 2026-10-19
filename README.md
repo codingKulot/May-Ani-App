@@ -53,10 +53,16 @@ Item ids are in `src/data/catalog.ts`.
 
 ## Architecture
 
+The full picture (where each kind of data lives, how several servers can run side by side, the decisions and the roadmap)
+is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
 - `src/core` store (persisted, `useSyncExternalStore`), hash router, actions, nav registry, data hooks
 - `src/services` provider seams: weather, hazards, market, health, ai, chat, geocode, planner, forecast (quantity x farm-gate/market price)
 - `src/data` catalog (+ user-added items via `buildCustomItem`), places, faults, diseases, permits, guides (plain data, easy to extend)
-- `src/pages`, `src/components` UI; `server/index.mjs` API (optional packages `mongodb` and `nodemailer` load only when accounts or email are switched on)
+- `src/pages`, `src/components` UI
+- `server/` the API, one file per part: `index.mjs` starts it, `config.mjs` reads every setting, `app.mjs` puts the parts
+  together (`auth`, `reset`, `mail`, `sync`, `chat`, `ai`, `images`, `static`, `limits`, `db`, `http`). Optional packages `mongodb`
+  and `nodemailer` load only when accounts or email are switched on.
 - Add a feature: page in `src/pages` → route in `App.tsx` → one entry in `core/nav.ts`.
 
 ## Turning on accounts (Sign up and Log in, MongoDB)
@@ -174,7 +180,8 @@ OpenAI account. Only logged-in users can use AI, and each day:
 
 - Change any number in `.env`; `0` means none. Set the totals to
   what you are willing to pay per day, and also set a monthly spending limit in each provider's console.
-- Counts start again at midnight, Philippine time, and also when the server restarts (they are kept in memory).
+- Counts start again at midnight, Philippine time. They are kept in MongoDB, so a restart does not reset them and several
+  copies of the server share them.
 - A check that cost nothing (no AI credit, AI unreachable or busy) does not count. The Health page shows the allowance and,
   when it runs out, says so.
 - The server's first lines show the limits: `Daily limits: AI checks 20 per account, 300 in total; ...`
@@ -199,6 +206,30 @@ OpenStreetMap tiles, and any https market feed or server address set in Settings
 are switched off there. As May-Ani needs a login, that server shows only the log-in screen. To try logging in, sync and chat
 without your Atlas data, run `bun scripts/test-db.ts` (a throwaway database, gone when you press Ctrl+C) and start the
 "server-test-db" preview (or `bun --env-file=scripts/test-db.env server/index.mjs`), then open http://localhost:8791.
+
+## Running more than one server (when May-Ani grows)
+
+May-Ani can run as several identical copies of the server behind a load balancer, so one copy can restart (or a new version
+can roll out) while the others keep serving. Everything the copies must share (accounts, farm data, chat, lockouts and the daily
+AI allowance) is in MongoDB; details and the reasons are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+- **Start several copies** with the same `MONGODB_URI` and `MONGODB_DB`, for example on one PC in two PowerShell windows:
+  `$env:PORT=8787; bun server/index.mjs` and `$env:PORT=8788; bun server/index.mjs`. Put a proxy (Caddy, nginx, Cloudflare,
+  or the hosting platform's own) in front and set `TRUST_PROXY`.
+- **Health checks** for the platform: `/api/live` answers while the process runs; `/api/ready` answers 200 only when MongoDB
+  answers and the copy is not stopping (otherwise 503).
+- **Stopping**: Ctrl+C (or SIGTERM from a platform) stops cleanly: live chats end (phones reconnect by themselves), requests
+  already running get up to 10 seconds. Press Ctrl+C a second time to stop at once.
+- **Logs**: by default the terminal shows plain sentences, plus a line for server errors and slow requests. `LOG_FORMAT=json` writes
+  one JSON line per request (time, request id, method, path without the part after `?`, status, milliseconds) for log tools.
+  Every answer carries an `X-Request-Id`; when someone reports a problem, that id finds it in the log. `INSTANCE_ID` names a copy.
+- **Container**: a `Dockerfile` is included for hosting platforms. It has **not been tested yet** (no Docker on the development
+  PC): build and run it once (`docker build -t may-ani .`, then `docker run --env-file .env -p 8787:8787 may-ani`) before relying on it.
+- **Automatic checks**: `.github/workflows/ci.yml` runs the type check, all tests and the build on GitHub for every change, once
+  the project is on GitHub (not yet).
+- **Old chat file**: chat used to be saved in `server/data.json`. The first start with MongoDB copies the accounts and their
+  messages from it into MongoDB and renames the file to `data.json.imported-<time>` (kept, never deleted; delete it yourself
+  once chat looks right).
 
 ## Roadmap
 Filipino/Cebuano UI, hogs & ASF module, official PHIVOLCS GIS layers, syncing photos to the account, DA Bantay Presyo ETL,

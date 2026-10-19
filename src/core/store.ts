@@ -158,16 +158,45 @@ export async function askToKeepData() {
 
 export const getState = () => state;
 
+// ---------- saving soon: changes in quick succession are written together ----------
+// Writing the whole app state on every change gets slow on a cheap phone once there are many records, so changes made close
+// together are saved once, SAVE_DELAY_MS after the first. Saved at once when May-Ani is hidden or closed (switching apps,
+// locking the phone, closing the tab), so nothing waiting is lost.
+export const SAVE_DELAY_MS = 300;
+let saveTimer: ReturnType<typeof setTimeout> | undefined;
+let saveTo: SaveStorage | null | undefined;
+
+/** Saves within SAVE_DELAY_MS; `to` for tests. */
+export function saveSoon(to?: SaveStorage | null) {
+  saveTo = to;
+  if (saveTimer !== undefined) return;
+  saveTimer = setTimeout(() => { saveTimer = undefined; persist(saveTo); }, SAVE_DELAY_MS);
+}
+
+/** Saves now if a save is waiting. */
+export function saveNow() {
+  if (saveTimer === undefined) return;
+  clearTimeout(saveTimer);
+  saveTimer = undefined;
+  persist(saveTo);
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('pagehide', saveNow);
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') saveNow(); });
+}
+
 export function setState(updater: (s: AppState) => AppState) {
   state = updater(state);
   setCustomItems(state.customItems);
-  persist();
+  saveSoon();
   listeners.forEach((l) => l());
 }
 
 export function resetState() {
   state = initialState();
-  persist();
+  saveSoon();
+  saveNow(); // "Delete all my data" and a restore are written at once
   forgetDamagedCopy(); // "Delete all my data" deletes that copy too
   listeners.forEach((l) => l());
 }

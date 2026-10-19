@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { DAMAGED_KEY, damagedCopy, getSaveProblem, loadFrom, persist, startupProblem, type SaveStorage } from '@/core/store';
+import { DAMAGED_KEY, damagedCopy, getSaveProblem, loadFrom, persist, SAVE_DELAY_MS, saveNow, saveSoon, startupProblem, type SaveStorage } from '@/core/store';
 
 const KEY = 'may-ani.state.v1';
 
@@ -66,5 +66,27 @@ describe('saving', () => {
     expect(getSaveProblem()).toContain('cannot save');
     persist(fakeStorage());
     expect(getSaveProblem()).toBe('');
+  });
+
+  test('changes close together are saved once, a moment later', async () => {
+    let writes = 0;
+    const phone = fakeStorage();
+    const counting: SaveStorage = { ...phone, setItem: (k, v) => { writes++; phone.setItem(k, v); } };
+    for (let i = 0; i < 5; i++) saveSoon(counting);
+    expect(writes).toBe(0);
+    await new Promise((r) => setTimeout(r, SAVE_DELAY_MS + 100));
+    expect(writes).toBe(1);
+    expect(JSON.parse(phone.items[KEY]).version).toBe(1);
+  });
+
+  test('a waiting save is written at once when the app is hidden or closed', () => {
+    let writes = 0;
+    const counting: SaveStorage = { ...fakeStorage(), setItem: () => { writes++; } };
+    saveSoon(counting);
+    saveSoon(counting);
+    saveNow();
+    expect(writes).toBe(1);
+    saveNow(); // nothing waiting: nothing written
+    expect(writes).toBe(1);
   });
 });

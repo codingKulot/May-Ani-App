@@ -1,30 +1,22 @@
 import { describe, expect, test } from 'bun:test';
-import { readFileSync } from 'node:fs';
 import { RECYCLABLE_IDS } from '@/data/recyclables';
 import { materialById } from '@/data/materials';
 import { savePhotos, loadPhotos, deletePhotos, toPayload, toStored, saveRender, loadRender } from '@/lib/photoStore';
 import { MAX_PROMPT } from '@/services/build/prompt';
-
-const server = readFileSync(new URL('../server/index.mjs', import.meta.url), 'utf8');
-
-const listIn = (name: string): string[] => {
-  const m = new RegExp(`const ${name} = \\[([^\\]]*)\\]`).exec(server);
-  if (!m) throw new Error(`${name} not found in server/index.mjs`);
-  return [...m[1].matchAll(/'([^']+)'/g)].map((x) => x[1]);
-};
+import * as server from '../server/shared.mjs';
 
 describe('server and app agree on ids', () => {
   test('the server accepts exactly the recyclable ids the app knows', () => {
-    expect(listIn('RECYCLABLE_IDS').sort()).toEqual([...RECYCLABLE_IDS].sort());
+    expect([...server.RECYCLABLE_IDS].sort()).toEqual([...RECYCLABLE_IDS].sort());
   });
   test('every on-site id the server accepts is a real material', () => {
-    for (const id of listIn('ONSITE_IDS')) expect(materialById(id)).toBeDefined();
+    for (const id of server.ONSITE_IDS) expect(materialById(id)).toBeDefined();
   });
 });
 
 describe('image endpoint', () => {
   test('server and app use the same prompt limit', () => {
-    expect(Number(/const MAX_PROMPT = (\d+)/.exec(server)?.[1])).toBe(MAX_PROMPT);
+    expect(server.MAX_PROMPT).toBe(MAX_PROMPT);
   });
   test('cached pictures are removed with the plan', async () => {
     await saveRender('p9', 'raised', 'data:image/png;base64,AAAA');

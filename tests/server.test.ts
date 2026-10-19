@@ -30,15 +30,20 @@ describe('static files', () => {
   }, 30_000);
 });
 
-describe('chat data file', () => {
+describe('chat data file from before MongoDB', () => {
   const dir = mkdtempSync(join(tmpdir(), 'may-ani-chat-'));
   afterAll(() => rmSync(dir, { recursive: true, force: true }));
 
-  test.skipIf(!mongo)('a damaged file is moved aside, never overwritten, and new chat data is saved whole', async () => {
+  test.skipIf(!mongo)('a damaged file is moved aside, never overwritten; chat is no longer written to a file', async () => {
     writeFileSync(join(dir, 'data.json'), '{"users":{"u1":{"id":"u1"');
     const srv = await startServer(withDb(), dir);
     try {
-      const aside = readdirSync(dir).filter((f) => f.startsWith('data.json.damaged-'));
+      // The old file is looked at once the database answers, a moment after the server starts.
+      let aside: string[] = [];
+      for (let i = 0; i < 100 && aside.length === 0; i++) {
+        aside = readdirSync(dir).filter((f) => f.startsWith('data.json.damaged-'));
+        if (aside.length === 0) await sleep(100);
+      }
       expect(aside.length).toBe(1);
       expect(readFileSync(join(dir, aside[0]), 'utf8')).toBe('{"users":{"u1":{"id":"u1"');
       expect(srv.log()).toContain('could not be read');
@@ -46,11 +51,10 @@ describe('chat data file', () => {
       const juan = await signUpUser(srv, 'Juan');
       const r = await call(srv, 'POST', '/api/chat/register', { blurb: 'Davao City' }, juan.token);
       expect(r.status).toBe(200);
-      await sleep(1200); // saves are grouped for half a second
-      const saved = JSON.parse(readFileSync(join(dir, 'data.json'), 'utf8'));
-      expect(saved.users[r.body.id].name).toBe('Juan');
-      expect(JSON.stringify(saved)).not.toContain(juan.token); // the login token is never written to the chat file
-      expect(existsSync(join(dir, 'data.json.tmp'))).toBe(false);
+      const users = (await call(srv, 'GET', '/api/chat/directory', undefined, juan.token)).body.users;
+      expect(users.find((u: { id: string }) => u.id === r.body.id).name).toBe('Juan');
+      await sleep(700);
+      expect(existsSync(join(dir, 'data.json'))).toBe(false); // chat lives in MongoDB now
     } finally {
       srv.stop();
     }

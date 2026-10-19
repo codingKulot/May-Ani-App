@@ -1,4 +1,4 @@
-import { getState, resetState, setState, uid } from './store';
+import { getState, resetState, saveNow, setState, uid } from './store';
 import type {
   AppState, Expense, ExpenseCategory, Farm, GeoPlace, HealthLogEntry, PlanInput, PlanResult, ProductionRecord,
   PlanBuild, Profile, Sale, SavedPlan, Task, CatalogItem } from '@/types';
@@ -233,6 +233,7 @@ export function importData(json: string): { ok: boolean; error?: string; skipped
     if (!next.farms.some((f) => f.id === next.activeFarmId)) next.activeFarmId = next.farms[0]?.id;
     return next;
   });
+  saveNow(); // a restored backup is written at once
   return { ok: true, skipped };
 }
 

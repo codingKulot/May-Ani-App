@@ -86,7 +86,9 @@ declare module 'bun:test' {
 
 declare module 'node:fs' {
   export function readFileSync(path: string | URL, encoding: 'utf8'): string;
-  export function writeFileSync(path: string, data: string): void;
+  export function writeFileSync(path: string, data: string | Uint8Array): void;
+  export function copyFileSync(from: string, to: string): void;
+  export function mkdirSync(path: string): void;
   export function readdirSync(path: string): string[];
   export function existsSync(path: string): boolean;
   export function mkdtempSync(prefix: string): string;
@@ -119,8 +121,12 @@ declare module 'node:net' {
 declare module 'node:http' {
   export function request(
     opts: { host: string; port: number; path: string; method: string; headers?: Record<string, string | number> },
-    cb: (res: { statusCode?: number; on(event: string, fn: (chunk?: any) => void): void }) => void,
+    cb: (res: { statusCode?: number; headers: Record<string, string | string[] | undefined>; on(event: string, fn: (chunk?: any) => void): void }) => void,
   ): { on(event: 'error', fn: (e: Error) => void): void; end(data?: string): void };
+}
+declare module 'node:zlib' {
+  export function brotliCompressSync(data: string | Uint8Array): Uint8Array;
+  export function gzipSync(data: string | Uint8Array): Uint8Array;
 }
 declare const Buffer: {
   from(data: string, encoding?: string): { toString(encoding?: string): string };

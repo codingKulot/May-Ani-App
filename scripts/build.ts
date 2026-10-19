@@ -1,5 +1,7 @@
 // Production build: bundles index.html (+ TSX, CSS) with Bun and copies /public.
-import { cp, rm } from 'node:fs/promises';
+import { cp, readdir, rm } from 'node:fs/promises';
+import { join } from 'node:path';
+import { brotliCompressSync, constants, gzipSync } from 'node:zlib';
 
 await rm('dist', { recursive: true, force: true });
 const result = await Bun.build({
@@ -24,4 +26,22 @@ const tags = [
   '<link rel="apple-touch-icon" href="./apple-touch-icon.png">', // iPhones ignore SVG here; the PNGs in /public were made from icon.svg
 ].join('');
 await Bun.write('dist/index.html', html.replace('</head>', `${tags}</head>`));
-console.log(`Built ${result.outputs.length} files into dist/`);
+
+// Compressed copies (.br brotli, .gz gzip) made once here, so the server never compresses on each request
+// (server/static.mjs sends the one the browser accepts). Keep the list the same as COMPRESSIBLE there.
+const COMPRESS = new Set(['.html', '.js', '.css', '.svg', '.json', '.webmanifest']);
+let before = 0;
+let after = 0;
+for (const entry of await readdir('dist', { recursive: true })) {
+  const file = join('dist', String(entry));
+  const ext = file.slice(file.lastIndexOf('.'));
+  if (!COMPRESS.has(ext)) continue;
+  const data = await Bun.file(file).bytes();
+  if (data.length < 1024) continue; // too small to be worth it
+  const br = brotliCompressSync(data, { params: { [constants.BROTLI_PARAM_QUALITY]: 11, [constants.BROTLI_PARAM_SIZE_HINT]: data.length } });
+  await Bun.write(`${file}.br`, br);
+  await Bun.write(`${file}.gz`, gzipSync(data, { level: 9 }));
+  before += data.length;
+  after += br.length;
+}
+console.log(`Built ${result.outputs.length} files into dist/ (app files ${Math.round(before / 1024)} KB, ${Math.round(after / 1024)} KB compressed)`);

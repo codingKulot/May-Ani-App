@@ -1,0 +1,12 @@
+# Never copied into a container image: secrets, local data, and things the image builds itself.
+.env
+.env.*
+!.env.example
+server/data.json
+server/data.json.*
+node_modules
+dist
+.git
+.github
+.claude
+*.log

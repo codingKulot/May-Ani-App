@@ -1,6 +1,6 @@
 import { afterAll, describe, expect, test } from 'bun:test';
-import { readFileSync } from 'node:fs';
 import { aiDiagnose, aiProblem, ApiError, PHOTO_SUBJECTS, type AiCheck } from '@/services/ai';
+import { PHOTO_SUBJECTS as SERVER_SUBJECTS } from '../server/shared.mjs';
 import { readAiCheck } from '@/services/health';
 import { setState } from '@/core/store';
 import { call, OFF, signUpUser, startMongo, startServer } from './support/server';
@@ -69,10 +69,7 @@ const BANANA = {
 // ------------------------------------------------------------------ app-side rules
 describe('health photo check: app rules', () => {
   test('server and app know the same photo subjects', () => {
-    const server = readFileSync(new URL('../server/index.mjs', import.meta.url), 'utf8');
-    const m = /const PHOTO_SUBJECTS = \[([^\]]*)\]/.exec(server);
-    expect(m).not.toBeNull();
-    expect([...m![1].matchAll(/'([^']+)'/g)].map((x) => x[1])).toEqual([...PHOTO_SUBJECTS]);
+    expect(SERVER_SUBJECTS).toEqual([...PHOTO_SUBJECTS]);
   });
 
   const check = (subject: AiCheck['subject'], n = 1): AiCheck => ({

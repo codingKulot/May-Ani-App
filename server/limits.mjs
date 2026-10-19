@@ -3,8 +3,9 @@
 //     platform) every request arrives from the proxy, so all users would share one address, one rate limit and one lockout.
 //     With TRUST_PROXY set, the address is read from X-Forwarded-For instead: from the right, because anyone can type
 //     whatever they like into the left part of that header.
-//   * dailyQuota(limits): counts paid AI uses (photo checks, pictures) per account, plus a total for the whole server, per
-//     Philippine calendar day. Only logged-in users may use AI. Kept in memory: restarting the server starts the counts again.
+//   * mongoCounters / memoryCounters: counters with an end time, shared by every copy of the server when kept in MongoDB.
+//   * dailyQuota(limits, { counters }): counts paid AI uses (photo checks, pictures) per account, plus a total for the whole
+//     server, per Philippine calendar day. Only logged-in users may use AI. In MongoDB the counts survive a restart.
 
 const norm = (ip) => {
   const s = String(ip ?? '').trim().slice(0, 64);
@@ -49,35 +50,103 @@ export function clientIp(req, trust = { mode: 'off' }) {
 /** Today's date in the Philippines (UTC+8, no daylight saving time): daily limits start again at midnight there. */
 export const phDay = (now = Date.now()) => new Date(now + 8 * 3_600_000).toISOString().slice(0, 10);
 
-/**
- * Daily allowance for one kind of paid use (only logged-in accounts may use AI). `limits`: { account, total } uses per day
- * (0 = none). take(userId) answers { ok: true, release() } (release gives the use back, for failures that cost nothing) or
- * { ok: false, reason: 'total' | 'account', limit }.
- */
-export function dailyQuota(limits, now = () => Date.now()) {
-  let day = phDay(now());
-  const used = new Map();
-  const count = (k) => used.get(k) ?? 0;
-  const roll = () => {
-    const d = phDay(now());
-    if (d !== day) { day = d; used.clear(); }
-  };
+// ------------------------------------------------------------------ counters shared by every copy of the server
+// The limits that protect accounts and money must be the same for every copy of the server and survive a restart, so they
+// are counted in MongoDB (collection `limits`: { _id: key, n, expiresAt }, removed by a TTL index once expired):
+// the wrong-password lockout, "forgot password" emails per address, and the daily AI allowance.
+// Every counter has an end time. A plain counter ends `ttlMs` after its first count; a `sliding` one `ttlMs` after its latest.
+// An ended counter starts again from 0. All methods are async and give the same answers for both kinds of store.
+
+/** Counters in MongoDB (the server's database from server/db.mjs). Each change is one atomic database update. */
+export function mongoCounters(database, now = () => Date.now()) {
+  const limits = database.collection('limits');
+  database.index('limits', { expiresAt: 1 }, { expireAfterSeconds: 0, name: 'expire' });
   return {
-    take(userId) {
-      roll();
-      if (count('total') >= limits.total) return { ok: false, reason: 'total', limit: limits.total };
-      const mine = `account:${userId}`;
-      if (count(mine) >= limits.account) return { ok: false, reason: 'account', limit: limits.account };
-      const keys = ['total', mine];
-      for (const k of keys) used.set(k, count(k) + 1);
-      const takenOn = day;
+    /** Counts one more and answers the new count. */
+    async add(key, { ttlMs, sliding = false }) {
+      await database.ensureIndexes();
+      const at = new Date(now());
+      const end = new Date(at.getTime() + ttlMs);
+      const live = { $gt: ['$expiresAt', at] }; // false for a new or ended counter: it starts again
+      const update = [{ $set: { n: { $cond: [live, { $add: ['$n', 1] }, 1] }, expiresAt: sliding ? end : { $cond: [live, '$expiresAt', end] } } }];
+      for (let attempt = 0; ; attempt++) {
+        try {
+          const doc = await limits.findOneAndUpdate({ _id: key }, update, { upsert: true, returnDocument: 'after' });
+          return doc?.n ?? 1;
+        } catch (e) {
+          if (e?.code !== 11000 || attempt > 2) throw e; // two first counts at the same moment: the second one tries again
+        }
+      }
+    },
+    /** Takes one back (a use that was refused or cost nothing). Never below 0, and never on an ended counter. */
+    async undo(key) {
+      await limits.updateOne({ _id: key, expiresAt: { $gt: new Date(now()) }, n: { $gt: 0 } }, { $inc: { n: -1 } });
+    },
+    async count(key) {
+      const doc = await limits.findOne({ _id: key, expiresAt: { $gt: new Date(now()) } });
+      return doc?.n ?? 0;
+    },
+    async clear(key) {
+      await limits.deleteOne({ _id: key });
+    },
+  };
+}
+
+/** The same counters in this process's memory: for the unit tests (one copy of the server, starts empty). */
+export function memoryCounters(now = () => Date.now()) {
+  const all = new Map(); // key -> { n, expiresAt }
+  const live = (key) => { const c = all.get(key); return c && c.expiresAt > now() ? c : undefined; };
+  return {
+    async add(key, { ttlMs, sliding = false }) {
+      const c = live(key);
+      const n = (c?.n ?? 0) + 1;
+      all.set(key, { n, expiresAt: c && !sliding ? c.expiresAt : now() + ttlMs });
+      return n;
+    },
+    async undo(key) {
+      const c = live(key);
+      if (c && c.n > 0) c.n--;
+    },
+    async count(key) {
+      return live(key)?.n ?? 0;
+    },
+    async clear(key) {
+      all.delete(key);
+    },
+  };
+}
+
+// ------------------------------------------------------------------ daily allowance for paid AI
+const DAY_KEEP_MS = 2 * 86_400_000; // a day's counters are kept a little longer than the day, then removed
+
+/**
+ * Daily allowance for one kind of paid use (`kind`: ai or pictures; only logged-in accounts may use AI). `limits`:
+ * { account, total } uses per Philippine day (0 = none), counted in `counters` (shared by every copy of the server).
+ * take(userId) answers { ok: true, release() } (release gives the use back, for failures that cost nothing) or
+ * { ok: false, reason: 'total' | 'account', limit }. A use is counted first and given back when it went over the limit,
+ * so two requests at the same moment can never both get the last one.
+ */
+export function dailyQuota(limits, { counters = memoryCounters(), kind = 'ai', now = () => Date.now() } = {}) {
+  return {
+    async take(userId) {
+      const day = phDay(now());
+      const total = `${kind}:${day}:total`;
+      const mine = `${kind}:${day}:account:${userId}`;
+      if ((await counters.add(total, { ttlMs: DAY_KEEP_MS })) > limits.total) {
+        await counters.undo(total);
+        return { ok: false, reason: 'total', limit: limits.total };
+      }
+      if ((await counters.add(mine, { ttlMs: DAY_KEEP_MS })) > limits.account) {
+        await Promise.all([counters.undo(mine), counters.undo(total)]);
+        return { ok: false, reason: 'account', limit: limits.account };
+      }
       let released = false;
       return {
         ok: true,
-        release() {
-          if (released || takenOn !== day) return;
+        async release() {
+          if (released) return;
           released = true;
-          for (const k of keys) used.set(k, Math.max(0, count(k) - 1));
+          await Promise.all([counters.undo(mine), counters.undo(total)]);
         },
       };
     },

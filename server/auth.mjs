@@ -7,8 +7,11 @@
 //              sessions { tokenHash (unique), userId, createdAt, expiresAt }
 //              appdata { _id: userId, rev, bytes, records, updatedAt }: the farm data that follows the account (see server/sync.mjs)
 //              password_resets { tokenHash (unique), userId, createdAt, expiresAt }: "forgot password" links (see server/reset.mjs)
+// The connection is server/db.mjs; the wrong-password lockout is a shared counter in `limits` (server/limits.mjs).
 
 import { scrypt as scryptCb, randomBytes, createHash, timingSafeEqual } from 'node:crypto';
+import { dbProblem } from './db.mjs';
+import { memoryCounters } from './limits.mjs';
 
 // Keep PASSWORD_MIN, PASSWORD_MAX and NAME_MAX in sync with src/services/auth.ts (a unit test checks this).
 export const PASSWORD_MIN = 8;
@@ -90,48 +93,28 @@ const publicUser = (u) => ({
 // ------------------------------------------------------------------ database
 const sha256 = (s) => createHash('sha256').update(s).digest('hex');
 
-/** For errors that mean "the database is unreachable or refuses us": a hint for the server log. Otherwise ''. */
-export function dbProblem(e) {
-  const name = e?.name ?? '';
-  if (e?.code === 18 || e?.code === 8000 || /Authentication/i.test(e?.codeName ?? '') || /bad auth|authentication failed/i.test(e?.message ?? '')) {
-    return 'MongoDB refused the username or password in MONGODB_URI.';
-  }
-  if (/^Mongo(ServerSelection|Network|NotConnected|Topology|ServerClosed)/.test(name)) {
-    return 'MongoDB is not reachable (is it running? On Atlas, is this computer\'s IP address allowed under Network Access?).';
-  }
-  return '';
-}
+export { dbProblem };
 
-/**
- * Connects lazily: the server starts even when the database is down, and every request tries again.
- * Throws only if the driver is missing or the address is not a valid MongoDB address.
- */
-export async function openAccounts(uri, dbName, timeoutMs = 8000) {
-  const { MongoClient } = await import('mongodb');
-  const client = new MongoClient(uri, { serverSelectionTimeoutMS: timeoutMs, appName: 'may-ani' });
-  const db = client.db(dbName);
-  const users = db.collection('users');
-  const sessions = db.collection('sessions');
-  const appdata = db.collection('appdata');
-  const resets = db.collection('password_resets');
-
-  let ready = null;
-  const ensureIndexes = () =>
-    (ready ??= Promise.all([
-      users.createIndex({ email: 1 }, { unique: true, name: 'email_unique' }),
-      sessions.createIndex({ tokenHash: 1 }, { unique: true, name: 'token_unique' }),
-      sessions.createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0, name: 'expire' }),
-      sessions.createIndex({ userId: 1 }, { name: 'by_user' }),
-      resets.createIndex({ tokenHash: 1 }, { unique: true, name: 'token_unique' }),
-      resets.createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0, name: 'expire' }),
-      resets.createIndex({ userId: 1 }, { name: 'by_user' }),
-    ]).catch((e) => { ready = null; throw e; }));
+/** The account methods on the server's database (server/db.mjs). */
+export function accountStore(database) {
+  const users = database.collection('users');
+  const sessions = database.collection('sessions');
+  const appdata = database.collection('appdata');
+  const resets = database.collection('password_resets');
+  database.index('users', { email: 1 }, { unique: true, name: 'email_unique' });
+  database.index('sessions', { tokenHash: 1 }, { unique: true, name: 'token_unique' });
+  database.index('sessions', { expiresAt: 1 }, { expireAfterSeconds: 0, name: 'expire' });
+  database.index('sessions', { userId: 1 }, { name: 'by_user' });
+  database.index('password_resets', { tokenHash: 1 }, { unique: true, name: 'token_unique' });
+  database.index('password_resets', { expiresAt: 1 }, { expireAfterSeconds: 0, name: 'expire' });
+  database.index('password_resets', { userId: 1 }, { name: 'by_user' });
+  const ensureIndexes = () => database.ensureIndexes();
 
   const expiry = () => new Date(Date.now() + SESSION_DAYS * DAY_MS);
 
   return {
     /** Resolves when MongoDB answers and the indexes exist. */
-    check: async () => { await ensureIndexes(); await db.command({ ping: 1 }); },
+    check: async () => { await ensureIndexes(); await database.ping(); },
     async createUser(doc) {
       await ensureIndexes();
       const now = new Date();
@@ -208,6 +191,10 @@ export async function openAccounts(uri, dbName, timeoutMs = 8000) {
     async loadAppData(userId) {
       return appdata.findOne({ _id: userId });
     },
+    /** Only the save number and size of the account's farm data (no records), or null: a cheap "anything new?" check. */
+    async appDataHead(userId) {
+      return appdata.findOne({ _id: userId }, { projection: { rev: 1, bytes: 1 } });
+    },
     /** Saves only if the document is still at `prevRev` (another phone may have saved in between). Returns false if it was not. */
     async saveAppData(userId, prevRev, { rev, records, bytes }) {
       const fields = { rev, records, bytes, updatedAt: new Date() };
@@ -223,7 +210,6 @@ export async function openAccounts(uri, dbName, timeoutMs = 8000) {
       const r = await appdata.updateOne({ _id: userId, rev: prevRev }, { $set: fields });
       return r.matchedCount === 1;
     },
-    close: () => client.close(),
   };
 }
 
@@ -231,19 +217,18 @@ export async function openAccounts(uri, dbName, timeoutMs = 8000) {
 const bearer = (req) => (req.headers.authorization || '').replace(/^Bearer\s+/i, '').trim();
 
 /**
- * Builds the /api/auth/* handler. `helpers` are the server's own json/readJson/limited functions.
- * `perMinute` is the per-IP limit for sign-up and log-in attempts.
+ * Builds the /api/auth/* handler. `helpers` are the server's own json/readJson/limited functions and its log.
+ * `perMinute` is the per-IP limit for sign-up and log-in attempts. `counters` (server/limits.mjs) keeps the wrong-password
+ * lockout, in MongoDB so every copy of the server sees the same count.
  * `extend` adds more /api/auth/* routes (server/reset.mjs). It gets `unlock(email)`, which ends a wrong-password lockout.
  */
-export function authRoutes(store, { json, readJson, limited }, perMinute = 20, extend = () => ({})) {
-  const fails = new Map(); // email -> { n, until }
-  setInterval(() => { const now = Date.now(); for (const [k, v] of fails) if (v.until < now && now - v.at > LOCK_MS) fails.delete(k); }, 60_000).unref();
-  const lockedOut = (email) => { const f = fails.get(email); return !!f && f.n >= MAX_FAILS && f.until > Date.now(); };
-  const noteFail = (email) => {
-    const f = fails.get(email);
-    const n = f && Date.now() - f.at < LOCK_MS ? f.n + 1 : 1;
-    fails.set(email, { n, at: Date.now(), until: n >= MAX_FAILS ? Date.now() + LOCK_MS : 0 });
-  };
+export function authRoutes(store, { json, readJson, limited, log = console }, { perMinute = 20, counters = memoryCounters(), extend = () => ({}) } = {}) {
+  // Wrong passwords in a row for one email (stored under a hash of the email, never the address): the count starts again
+  // LOCK_MS after the latest wrong one, and MAX_FAILS of them lock the email until then.
+  const lockKey = (email) => `login:${sha256(email)}`;
+  const lockedOut = async (email) => (await counters.count(lockKey(email))) >= MAX_FAILS;
+  const noteFail = (email) => counters.add(lockKey(email), { ttlMs: LOCK_MS, sliding: true });
+  const unlock = (email) => counters.clear(lockKey(email));
   // Checking a password for an email that has no account costs the same time, so response time does not reveal who has an account.
   let dummyHash = null;
   const dummy = () => (dummyHash ??= hashPassword(randomBytes(12).toString('hex')));
@@ -284,14 +269,14 @@ export function authRoutes(store, { json, readJson, limited }, perMinute = 20, e
     const email = normalizeEmail(b.email);
     const password = typeof b.password === 'string' ? b.password : '';
     if (!email || !password) return json(res, 400, { error: 'Enter your email and password.' });
-    if (lockedOut(email)) return json(res, 429, { error: 'Too many wrong passwords for this email. Please wait 15 minutes and try again.' });
+    if (await lockedOut(email)) return json(res, 429, { error: 'Too many wrong passwords for this email. Please wait 15 minutes and try again.' });
     const user = validEmail(email) ? await store.findUserByEmail(email) : null;
     const ok = await verifyPassword(password, user?.passwordHash ?? (await dummy()));
     if (!user || !ok) {
-      noteFail(email);
+      await noteFail(email);
       return json(res, 401, { error: 'Wrong email or password.' });
     }
-    fails.delete(email);
+    await unlock(email);
     await store.noteLogin(user._id);
     const token = await store.createSession(user._id);
     json(res, 200, { token, user: publicUser(user) });
@@ -333,7 +318,7 @@ export function authRoutes(store, { json, readJson, limited }, perMinute = 20, e
 
   const routes = {
     'POST /api/auth/signup': signup, 'POST /api/auth/login': login, 'GET /api/auth/me': me, 'POST /api/auth/profile': profile, 'POST /api/auth/logout': logout,
-    ...extend({ unlock: (email) => fails.delete(email) }),
+    ...extend({ unlock }),
   };
 
   return async function handleAuth(req, res, url) {
@@ -344,7 +329,7 @@ export function authRoutes(store, { json, readJson, limited }, perMinute = 20, e
     } catch (e) {
       const problem = dbProblem(e);
       if (!problem) throw e;
-      console.error(`Accounts: ${problem} (${e.message})`);
+      log.error(`Accounts: ${problem} (${e.message})`);
       if (!res.headersSent) json(res, 503, { error: 'The account database cannot be reached right now. Please try again in a minute.' });
     }
   };

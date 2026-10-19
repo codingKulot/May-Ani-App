@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from 'bun:test';
-import { clientIp, dailyQuota, envCount, parseTrustProxy, phDay } from '../server/limits.mjs';
+import { clientIp, dailyQuota, envCount, memoryCounters, parseTrustProxy, phDay } from '../server/limits.mjs';
 import { OFF, signUpUser, startMongo, startServer, type Srv } from './support/server';
 
 /**
@@ -45,45 +45,82 @@ describe('the caller\'s address (TRUST_PROXY)', () => {
 
 describe('daily allowance', () => {
   const limits = { account: 2, total: 3 };
+  const ok = async (p: Promise<{ ok: boolean }>) => (await p).ok;
 
   test('the day changes at midnight in the Philippines (UTC+8)', () => {
     expect(phDay(Date.parse('2026-10-18T15:59:59Z'))).toBe('2026-10-18');
     expect(phDay(Date.parse('2026-10-18T16:00:00Z'))).toBe('2026-10-19');
   });
 
-  test('per account, and in total for the whole server', () => {
+  test('per account, and in total for the whole server', async () => {
     const q = dailyQuota(limits);
-    expect(q.take('u1').ok).toBe(true);
-    expect(q.take('u1').ok).toBe(true);
-    expect(q.take('u1')).toEqual({ ok: false, reason: 'account', limit: 2 });
-    expect(q.take('u2').ok).toBe(true);
-    expect(q.take('u3')).toEqual({ ok: false, reason: 'total', limit: 3 });
+    expect(await ok(q.take('u1'))).toBe(true);
+    expect(await ok(q.take('u1'))).toBe(true);
+    expect(await q.take('u1')).toEqual({ ok: false, reason: 'account', limit: 2 });
+    expect(await ok(q.take('u2'))).toBe(true);
+    expect(await q.take('u3')).toEqual({ ok: false, reason: 'total', limit: 3 });
   });
 
-  test('a use that cost nothing is given back, once', () => {
+  test('a use that cost nothing is given back, once', async () => {
     const q = dailyQuota(limits);
-    const t = q.take('u1');
+    const t = await q.take('u1');
     if (!t.ok) throw new Error('should be allowed');
-    t.release();
-    t.release();
-    expect(q.take('u1').ok).toBe(true);
-    expect(q.take('u1').ok).toBe(true);
-    expect(q.take('u1').ok).toBe(false);
+    await t.release();
+    await t.release();
+    expect(await ok(q.take('u1'))).toBe(true);
+    expect(await ok(q.take('u1'))).toBe(true);
+    expect(await ok(q.take('u1'))).toBe(false);
   });
 
-  test('everything starts again the next Philippine day', () => {
+  test('a refused use does not count: the next account still gets the rest of the total', async () => {
+    const q = dailyQuota({ account: 1, total: 2 });
+    expect(await ok(q.take('u1'))).toBe(true);
+    for (let i = 0; i < 5; i++) expect(await ok(q.take('u1'))).toBe(false);
+    expect(await ok(q.take('u2'))).toBe(true);
+  });
+
+  test('two uses at the same moment never both get the last one', async () => {
+    const q = dailyQuota({ account: 10, total: 3 });
+    const all = await Promise.all(['a', 'b', 'c', 'd', 'e', 'f'].map((u) => q.take(u)));
+    expect(all.filter((t) => t.ok).length).toBe(3);
+  });
+
+  test('everything starts again the next Philippine day', async () => {
     let now = Date.parse('2026-10-18T15:00:00Z');
-    const q = dailyQuota({ account: 1, total: 10 }, () => now);
-    expect(q.take('u1').ok).toBe(true);
-    expect(q.take('u1').ok).toBe(false);
+    const clock = () => now;
+    const q = dailyQuota({ account: 1, total: 10 }, { counters: memoryCounters(clock), now: clock });
+    expect(await ok(q.take('u1'))).toBe(true);
+    expect(await ok(q.take('u1'))).toBe(false);
     now = Date.parse('2026-10-18T16:00:01Z');
-    expect(q.take('u1').ok).toBe(true);
+    expect(await ok(q.take('u1'))).toBe(true);
   });
 
-  test('0 means none; numbers from .env fall back to the default when missing or wrong', () => {
-    expect(dailyQuota({ account: 0, total: 10 }).take('u1')).toEqual({ ok: false, reason: 'account', limit: 0 });
+  test('0 means none; numbers from .env fall back to the default when missing or wrong', async () => {
+    expect(await dailyQuota({ account: 0, total: 10 }).take('u1')).toEqual({ ok: false, reason: 'account', limit: 0 });
     const env = { A: '7', B: '', C: 'ten', D: '-1', E: '2.5', F: '0' };
     expect(['A', 'B', 'C', 'D', 'E', 'F', 'G'].map((k) => envCount(env, k, 5))).toEqual([7, 5, 5, 5, 5, 0, 5]);
+  });
+});
+
+describe('counters with an end time', () => {
+  test('a plain counter ends a fixed time after its first count; a sliding one after its latest', async () => {
+    let now = 0;
+    const c = memoryCounters(() => now);
+    expect(await c.add('plain', { ttlMs: 100 })).toBe(1);
+    expect(await c.add('slide', { ttlMs: 100, sliding: true })).toBe(1);
+    now = 80;
+    expect(await c.add('plain', { ttlMs: 100 })).toBe(2);
+    expect(await c.add('slide', { ttlMs: 100, sliding: true })).toBe(2);
+    now = 150; // the plain one ended at 100, the sliding one ends at 180
+    expect(await c.count('plain')).toBe(0);
+    expect(await c.count('slide')).toBe(2);
+    expect(await c.add('plain', { ttlMs: 100 })).toBe(1);
+    await c.undo('slide');
+    expect(await c.count('slide')).toBe(1);
+    await c.clear('slide');
+    expect(await c.count('slide')).toBe(0);
+    await c.undo('slide'); // never below 0
+    expect(await c.count('slide')).toBe(0);
   });
 });
 

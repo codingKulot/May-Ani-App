@@ -4,7 +4,7 @@ import type { AppState, ChatContact, ChatMessage } from '@/types';
 import { ApiError, chatApi, serverStatus, type DirectoryUser, type ServerMessage } from './ai';
 
 /**
- * Chat between logged-in May-Ani users (server/index.mjs /api/chat/*). Everyone in it is a real account ("acct-<id>", the same
+ * Chat between logged-in May-Ani users (server/chat.mjs, /api/chat/*). Everyone in it is a real account ("acct-<id>", the same
  * on every phone, with the account's name); every call carries the login, and there are no guests or sample contacts.
  * Without the server (no signal), the conversations already on this phone stay readable and sending waits for the connection.
  * Once this phone has joined (opened Community), the connection stays open on every page, so new messages show as unread

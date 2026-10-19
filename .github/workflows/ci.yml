@@ -1,0 +1,27 @@
+# Checks every change pushed to GitHub: types, all tests, and the production build.
+# NOT YET TESTED: May-Ani has no GitHub copy yet (October 2026). It starts working once the project is pushed to GitHub.
+# The tests use a throwaway MongoDB (mongodb-memory-server) and fake AI and mail servers: no keys or secrets are needed here.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.3
+      # the MongoDB program the tests download, kept between runs
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/mongodb-binaries
+          key: mongodb-binaries-${{ runner.os }}-${{ hashFiles('bun.lock') }}
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
+      - run: bun test
+      - run: bun run build
