@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
-import { LuEllipsis, LuSprout } from 'react-icons/lu';
+import { LuEllipsis, LuLogOut, LuSprout } from 'react-icons/lu';
 import { MORE_ITEMS, NAV, TABS, isActive } from '@/core/nav';
 import { Link, useHash } from '@/core/router';
 import { useAppState, useSaveProblem } from '@/core/store';
 import { totalUnread } from '@/services/chat';
 import { Avatar, Sheet } from './ui';
+import { useLogOut } from './AuthForms';
 
 export function Brand({ light }: { light?: boolean }) {
   return (
@@ -20,6 +21,7 @@ export function Shell({ children, title }: { children: ReactNode; title?: string
   const state = useAppState();
   const { profile } = state;
   const saveProblem = useSaveProblem();
+  const { logOutNow, busy: loggingOut } = useLogOut();
   const unread = totalUnread(state);
   /** The unread chat count on the Community / Chat menu item. */
   const countFor = (id: string) => (id === 'community' && unread > 0
@@ -49,6 +51,9 @@ export function Shell({ children, title }: { children: ReactNode; title?: string
             </Link>
           ))}
         </nav>
+        <button type="button" className="sidebar-logout" onClick={logOutNow} disabled={loggingOut}>
+          <LuLogOut size={19} /> {loggingOut ? 'Logging out…' : 'Log out'}
+        </button>
         <div className="me">
           <Avatar name={profile?.name ?? '?'} />
           <div>
@@ -91,6 +96,19 @@ export function Shell({ children, title }: { children: ReactNode; title?: string
               {n.label}
             </Link>
           ))}
+        </div>
+        {/* Phones and tablets have no sidebar: the same "Log out" sits here, just above the account name */}
+        <div className="sheet-account">
+          <button type="button" className="sheet-logout" onClick={logOutNow} disabled={loggingOut}>
+            <LuLogOut size={20} /> {loggingOut ? 'Logging out…' : 'Log out'}
+          </button>
+          <div className="sheet-me">
+            <Avatar name={profile?.name ?? '?'} />
+            <div>
+              {profile?.name}
+              <small>{profile?.account?.email}</small>
+            </div>
+          </div>
         </div>
       </Sheet>
     </div>

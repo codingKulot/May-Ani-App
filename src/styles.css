@@ -108,6 +108,27 @@ body.sheet-open { overflow: hidden; }
 .sheet-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
 .sheet-grid a { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 14px 6px; border-radius: var(--radius); background: var(--green-50); color: var(--text); font-size: 13px; text-align: center; text-decoration: none; }
 .sheet-grid a svg { color: var(--green-800); }
+/* bottom of the "More" sheet (phones and tablets): Log out just above the account name, like the sidebar on desktop */
+.sheet-account { display: grid; gap: 4px; margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--border); }
+.sheet-logout {
+  display: flex; align-items: center; gap: 12px; width: 100%; min-height: 48px; padding: 10px 12px; border: 0; border-radius: 12px;
+  background: none; color: var(--text); font: inherit; font-size: 15px; font-weight: 600; text-align: left; cursor: pointer;
+}
+.sheet-logout svg { color: var(--green-800); }
+.sheet-logout:hover { background: var(--green-50); }
+.sheet-logout:disabled { opacity: .6; cursor: default; }
+.sheet-me { display: flex; align-items: center; gap: 10px; padding: 4px 12px; font-size: 14px; }
+.sheet-me > div { min-width: 0; }
+.sheet-me small { display: block; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* a phone turned sideways is very short: a wider, flatter "More" menu so Log out and the name fit without scrolling */
+@media (orientation: landscape) and (max-height: 500px) and (max-width: 959px) {
+  .sheet:has(.sheet-grid) { max-width: 720px; padding-top: 12px; padding-bottom: 12px; }
+  .sheet:has(.sheet-grid) h2 { margin-bottom: 6px; }
+  .sheet-grid { grid-template-columns: repeat(5, 1fr); gap: 6px; }
+  .sheet-grid a { flex-direction: row; justify-content: flex-start; gap: 6px; padding: 8px; font-size: 12px; text-align: left; }
+  .sheet-account { margin-top: 8px; padding-top: 6px; gap: 0; }
+  .sheet-logout { min-height: 44px; }
+}
 
 @media (min-width: 960px) {
   .sidebar {
@@ -125,6 +146,14 @@ body.sheet-open { overflow: hidden; }
   font-size: 14px; text-decoration: none;
 }
 .sidebar nav a:hover { background: rgba(255,255,255,.08); }
+/* "Log out" just above the account name: looks like the menu items, lightly set apart from them */
+.sidebar-logout {
+  display: flex; align-items: center; gap: 11px; width: 100%; padding: 10px 12px; margin-top: 8px; border: 0; border-radius: 10px;
+  background: none; color: rgba(255,255,255,.82); font: inherit; font-size: 14px; text-align: left; cursor: pointer;
+}
+.sidebar-logout:hover { background: rgba(255,255,255,.08); color: #fff; }
+.sidebar-logout:focus-visible { outline: 2px solid #fff; outline-offset: -2px; }
+.sidebar-logout:disabled { opacity: .6; cursor: default; }
 .sidebar nav a.active { background: var(--green-700); color: #fff; font-weight: 600; }
 .sidebar .me { display: flex; align-items: center; gap: 10px; padding: 12px 10px 4px; border-top: 1px solid rgba(255,255,255,.14); margin-top: 8px; font-size: 13px; }
 .sidebar .me > div { min-width: 0; }

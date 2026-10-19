@@ -283,9 +283,14 @@ export function ForgotForm(p: { initialEmail?: string; onBack?: () => void }) {
   );
 }
 
-export function LogOutButton() {
+/**
+ * Logging out, shared by the Settings button and the sidebar shortcut: asks first, sends changes still waiting for the account
+ * (and warns if it cannot), then logs out and goes to the Welcome screen. The farm data stays on the phone.
+ */
+export function useLogOut(): { logOutNow: () => Promise<void>; busy: boolean } {
   const [busy, setBusy] = useState(false);
-  const run = async () => {
+  const logOutNow = async () => {
+    if (busy) return;
     if (!(await askConfirm({
       title: 'Log out on this phone?',
       message: 'Your farms, plans and records stay on this phone and in your account. To remove them from this phone too, use "Delete all my data" in Settings.',
@@ -306,5 +311,10 @@ export function LogOutButton() {
     signOutLocal();
     navigate('/welcome');
   };
-  return <Button variant="secondary" onClick={run} disabled={busy}><LuLogOut size={16} /> {busy ? 'Logging out...' : 'Log out'}</Button>;
+  return { logOutNow, busy };
+}
+
+export function LogOutButton() {
+  const { logOutNow, busy } = useLogOut();
+  return <Button variant="secondary" onClick={logOutNow} disabled={busy}><LuLogOut size={16} /> {busy ? 'Logging out...' : 'Log out'}</Button>;
 }
