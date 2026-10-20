@@ -87,7 +87,7 @@ Then run `bun run start` and open http://localhost:8787. The server's first line
 `Accounts: connected to MongoDB.` If it says it cannot use MongoDB, the next words say why (wrong password, IP not allowed, not running).
 
 What is stored: collection `users` (email, name, role, location, scrypt password hash, dates), `sessions` (SHA-256 of each login
-token, expiry; MongoDB deletes expired ones by itself) and `appdata` (each account's farm data, see "Your farm data follows your account"). Logins last 60 days from last use. 5 wrong passwords lock that email for 15 minutes.
+token, expiry; MongoDB deletes expired ones by itself) and `appdata` (each account's farm data, see "Your farm data follows your account"). Logins last 60 days from last use. 5 wrong passwords lock that email for 15 minutes on the device or network they came from (the owner elsewhere can still log in); 50 wrong passwords from many places lock the email for an hour.
 
 Tests: `tests/auth.test.ts` starts its own throwaway MongoDB (package `mongodb-memory-server`) and never touches your database.
 On Windows it needs the Microsoft Visual C++ Redistributable x64 (https://aka.ms/vs/17/release/vc_redist.x64.exe); without it those tests are skipped with a message.

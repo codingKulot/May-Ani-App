@@ -68,7 +68,10 @@ export function httpKit({ allowedOrigin = '*', trust = { mode: 'off' } } = {}) {
   const sweep = setInterval(() => { const now = Date.now(); for (const [k, v] of hits) if (now - v.start > 120_000) hits.delete(k); }, 60_000);
   sweep.unref?.();
 
-  return { json, cors, readJson, limited, stop: () => clearInterval(sweep) };
+  /** The caller's address (TRUST_PROXY rules in server/limits.mjs). */
+  const ip = (req) => clientIp(req, trust);
+
+  return { json, cors, readJson, limited, ip, stop: () => clearInterval(sweep) };
 }
 
 // ------------------------------------------------------------------ security headers

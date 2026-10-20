@@ -115,15 +115,28 @@ const isPlace = (v: unknown) => isObj(v) && isStr(v.name) && isNum(v.lat) && isN
 const SECTORS: readonly string[] = APP_SECTORS;
 /** `sectors` (mixed plans and farms, since 20 October 2026) is optional; when present it is one or more known types. */
 const isSectorList = (v: unknown) => v === undefined || (Array.isArray(v) && v.length > 0 && v.length <= SECTORS.length && v.every((x) => SECTORS.includes(x)));
-const ITEM_NUMBERS = ['daysToHarvest', 'cycleDays', 'minAreaSqm', 'startupCostPerSqm', 'opCostPerSqmMonth', 'yieldKgPerSqm', 'farmGatePerKg', 'waterLPerSqmDay'];
+/** A list whose every entry passes `ok` (pages loop over these lists and read the entries' fields). */
+const listOf = (v: unknown, ok: (x: any) => boolean) => Array.isArray(v) && v.every((x) => ok(x));
+const isAllocation = (a: unknown) => isObj(a) && isStr(a.itemId) && isNum(a.areaSqm);
+const isCostLine = (l: unknown) => isObj(l) && isStr(l.label) && isNum(l.amount);
+const isRect = (x: unknown) => isObj(x) && isNum(x.x) && isNum(x.y) && isNum(x.w) && isNum(x.h) && isStr(x.kind);
+const isStep = (x: unknown) => isObj(x) && isNum(x.week) && isStr(x.title) && isStr(x.detail);
+const isCost = (c: unknown) => isObj(c) && isNum(c.initial) && isNum(c.monthlyOperating) && isNum(c.monthlyIncomeMin) && isNum(c.monthlyIncomeMax)
+  && (c.paybackMonths === null || isNum(c.paybackMonths)) && listOf(c.breakdown, isCostLine);
+const ITEM_NUMBERS =['daysToHarvest', 'cycleDays', 'minAreaSqm', 'startupCostPerSqm', 'opCostPerSqmMonth', 'yieldKgPerSqm', 'farmGatePerKg', 'waterLPerSqmDay'];
 
 const GUARDS: Record<ListCollection, (d: Data) => boolean> = {
   farms: (d) => isStr(d.name) && SECTORS.includes(d.sector) && isSectorList(d.sectors) && isNum(d.areaSqm) && isPlace(d.location) && isStr(d.createdAt),
   plans: (d) => {
     const r = d.result;
-    return isStr(d.createdAt) && isObj(d.input) && SECTORS.includes(d.input.sector) && isSectorList(d.input.sectors) && isPlace(d.input.location) && isObj(d.input.site)
-      && isObj(r) && isStr(r.title) && Array.isArray(r.allocations) && isObj(r.cost) && isObj(r.layout) && Array.isArray(r.layout.rects)
-      && isObj(r.water) && isObj(r.drainage) && isObj(r.electrical) && Array.isArray(r.schedule) && Array.isArray(r.warnings) && Array.isArray(r.assumptions);
+    // Checked down to the entries of each list: one broken plan (an edited backup, another app version) used to pass here
+    // and then crash the Planner on every phone of the account (review of 20 October 2026).
+    return isStr(d.createdAt) && isObj(d.input) && isStr(d.input.name) && SECTORS.includes(d.input.sector) && isSectorList(d.input.sectors)
+      && isNum(d.input.areaSqm) && isNum(d.input.capital) && isPlace(d.input.location) && isObj(d.input.site)
+      && (d.input.preferred === undefined || listOf(d.input.preferred, isStr))
+      && isObj(r) && isStr(r.title) && isStr(r.summary) && isNum(r.usedAreaSqm) && listOf(r.allocations, isAllocation) && isCost(r.cost)
+      && isObj(r.layout) && isNum(r.layout.widthM) && isNum(r.layout.lengthM) && listOf(r.layout.rects, isRect)
+      && isObj(r.water) && isObj(r.drainage) && isObj(r.electrical) && listOf(r.schedule, isStep) && listOf(r.warnings, isStr) && listOf(r.assumptions, isStr);
   },
   tasks: (d) => isStr(d.title) && isStr(d.date) && isBool(d.done),
   expenses: (d) => isStr(d.date) && isStr(d.category) && isStr(d.note) && isNum(d.amount),

@@ -120,8 +120,15 @@ export async function createApp(config, { log = makeLog({ format: config.logForm
   const inFlight = new Set(); // requests being answered (not live streams), so stopping can wait for them
   const server = http.createServer(async (req, res) => {
     const started = Date.now();
-    const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
+    // Only the path and query are used. The Host header is never trusted (a broken one, like "exa mple", used to crash the
+    // whole server here; links in emails come from APP_URL), so the address is read against a fixed base.
+    let url;
+    try { url = new URL(req.url || '/', 'http://localhost'); } catch { url = null; }
     const id = requestId(req, config.trust);
+    if (!url) {
+      for (const [name, value] of Object.entries(headers)) res.setHeader(name, value);
+      return json(res, 400, { error: 'Bad address' });
+    }
     for (const [name, value] of Object.entries(headers)) res.setHeader(name, value);
     res.setHeader('X-Request-Id', id);
     if (stopping) res.setHeader('Connection', 'close');

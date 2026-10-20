@@ -3,6 +3,7 @@ import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSy
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
+import { connect } from 'node:net';
 import { fileURLToPath } from 'node:url';
 import { call, signUpUser, sleep, startMongo, startServer } from './support/server';
 
@@ -15,6 +16,32 @@ const withDb = (): Record<string, string> => (mongo ? { MONGODB_URI: mongo.getUr
 declare const Bun: {
   serve(o: { port: number; hostname: string; fetch(req: Request): Response | Promise<Response> }): { port: number; stop(force?: boolean): void };
 };
+
+/** A raw HTTP request (fetch does not allow a broken Host header). Answers the status line, or what happened. */
+const rawRequest = (port: number, text: string) => new Promise<string>((ok) => {
+  const socket = connect(port, '127.0.0.1');
+  let got = '';
+  socket.on('data', (d) => (got += d));
+  socket.on('error', (e) => ok(`error ${e.message}`));
+  socket.on('close', () => ok(got.split('\r\n')[0] || 'closed without an answer'));
+  socket.write(text);
+  setTimeout(() => socket.destroy(), 3000);
+});
+
+describe('a broken Host header (review of 20 October 2026)', () => {
+  test('is answered 400 and the server keeps running (it used to stop the whole server)', async () => {
+    const srv = await startServer({});
+    try {
+      for (const host of ['exa mple', '[', 'a:b:c', '%']) {
+        expect(await rawRequest(srv.port, `GET /api/live HTTP/1.1\r\nHost: ${host}\r\nConnection: close\r\n\r\n`)).toMatch(/^HTTP\/1\.1 (200|400)/);
+      }
+      expect((await fetch(`${srv.url}/api/live`)).status).toBe(200);
+      expect(srv.log()).not.toContain('Invalid URL');
+    } finally {
+      srv.stop();
+    }
+  }, 30_000);
+});
 
 describe('static files', () => {
   test('a folder next to dist (like dist-old) cannot be read, and a broken %-code is a bad request', async () => {

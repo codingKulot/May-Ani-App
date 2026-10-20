@@ -20,8 +20,10 @@ export const NAME_MAX = 60;
 const ROLES = ['farmer', 'supplier', 'buyer', 'expert'];
 const SESSION_DAYS = 60;
 const DAY_MS = 86_400_000;
-const MAX_FAILS = 5; // wrong passwords in a row for one email ...
-const LOCK_MS = 15 * 60_000; // ... locks that email for 15 minutes
+const MAX_FAILS = 5; // wrong passwords for one email from one address ...
+const LOCK_MS = 15 * 60_000; // ... lock that address out of that email for 15 minutes (the owner elsewhere can still log in)
+const MAX_EMAIL_FAILS = 50; // wrong passwords for one email from ALL addresses together ...
+const EMAIL_LOCK_MS = 60 * 60_000; // ... lock the email for an hour (guessing spread over many addresses)
 const AUTH_BODY = 16 * 1024;
 
 // ------------------------------------------------------------------ passwords
@@ -222,13 +224,24 @@ const bearer = (req) => (req.headers.authorization || '').replace(/^Bearer\s+/i,
  * lockout, in MongoDB so every copy of the server sees the same count.
  * `extend` adds more /api/auth/* routes (server/reset.mjs). It gets `unlock(email)`, which ends a wrong-password lockout.
  */
-export function authRoutes(store, { json, readJson, limited, log = console }, { perMinute = 20, counters = memoryCounters(), extend = () => ({}) } = {}) {
-  // Wrong passwords in a row for one email (stored under a hash of the email, never the address): the count starts again
-  // LOCK_MS after the latest wrong one, and MAX_FAILS of them lock the email until then.
-  const lockKey = (email) => `login:${sha256(email)}`;
-  const lockedOut = async (email) => (await counters.count(lockKey(email))) >= MAX_FAILS;
-  const noteFail = (email) => counters.add(lockKey(email), { ttlMs: LOCK_MS, sliding: true });
-  const unlock = (email) => counters.clear(lockKey(email));
+export function authRoutes(store, { json, readJson, limited, ip = (req) => req.socket?.remoteAddress ?? '', log = console }, { perMinute = 20, counters = memoryCounters(), extend = () => ({}) } = {}) {
+  // Wrong-password lockout (stored under hashes of the email and the caller's address, never the address itself).
+  // Locking the whole email after a few wrong tries would let anyone lock a farmer out of their own account, so:
+  //   * MAX_FAILS tries from one address lock only that address out of that email (LOCK_MS after its latest try);
+  //   * MAX_EMAIL_FAILS tries from all addresses together lock the email for EMAIL_LOCK_MS (guessing from many addresses).
+  // Every try is counted BEFORE the password is checked, so tries sent at the same moment cannot slip past the limit.
+  // A right password takes its own try back and ends that address's lockout.
+  const emailKey = (email) => `login:${sha256(email)}`;
+  const pairKey = (email, req) => `${emailKey(email)}:${sha256(ip(req) || 'unknown')}`;
+  // Ends every lockout of the email (after a password reset): the email-wide counter and the one of every address.
+  const unlock = (email) => counters.clearPrefix(emailKey(email));
+  /** Counts one try. 'address' or 'email' when that limit is passed (the password must then not be checked), else ''. */
+  // Tries refused by the address lock are not added to the email-wide count: one address alone can never lock the owner out.
+  async function countTry(email, req) {
+    if ((await counters.add(pairKey(email, req), { ttlMs: LOCK_MS, sliding: true })) > MAX_FAILS) return 'address';
+    if ((await counters.add(emailKey(email), { ttlMs: EMAIL_LOCK_MS, sliding: true })) > MAX_EMAIL_FAILS) return 'email';
+    return '';
+  }
   // Checking a password for an email that has no account costs the same time, so response time does not reveal who has an account.
   let dummyHash = null;
   const dummy = () => (dummyHash ??= hashPassword(randomBytes(12).toString('hex')));
@@ -269,14 +282,19 @@ export function authRoutes(store, { json, readJson, limited, log = console }, { 
     const email = normalizeEmail(b.email);
     const password = typeof b.password === 'string' ? b.password : '';
     if (!email || !password) return json(res, 400, { error: 'Enter your email and password.' });
-    if (await lockedOut(email)) return json(res, 429, { error: 'Too many wrong passwords for this email. Please wait 15 minutes and try again.' });
+    const locked = await countTry(email, req);
+    if (locked) {
+      return json(res, 429, {
+        error: locked === 'address'
+          ? 'Too many wrong passwords for this email. Please wait 15 minutes and try again, or use "Forgot your password?".'
+          : 'Too many wrong passwords for this email from many places. Please wait an hour and try again, or use "Forgot your password?".',
+      });
+    }
     const user = validEmail(email) ? await store.findUserByEmail(email) : null;
     const ok = await verifyPassword(password, user?.passwordHash ?? (await dummy()));
-    if (!user || !ok) {
-      await noteFail(email);
-      return json(res, 401, { error: 'Wrong email or password.' });
-    }
-    await unlock(email);
+    if (!user || !ok) return json(res, 401, { error: 'Wrong email or password.' });
+    // the right password: this try is taken back, and this address's wrong tries are forgotten
+    await Promise.all([counters.clear(pairKey(email, req)), counters.undo(emailKey(email))]);
     await store.noteLogin(user._id);
     const token = await store.createSession(user._id);
     json(res, 200, { token, user: publicUser(user) });

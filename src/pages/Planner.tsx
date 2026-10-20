@@ -59,7 +59,7 @@ export function Planner({ editId }: { editId?: string }) {
     if (edit) {
       const i = edit.input;
       // plans made before a name was required keep the title they were shown with
-      return { name: i.name.trim() || edit.result.title, sectors: planSectors(i), areaValue: i.areaSqm, unit: 'sqm', capital: i.capital, place: i.location, experience: i.experience, goal: i.goal, site: i.site, preferred: i.preferred ?? [] };
+      return { name: String(i.name ?? '').trim() || edit.result.title, sectors: planSectors(i), areaValue: i.areaSqm, unit: 'sqm', capital: i.capital, place: i.location, experience: i.experience, goal: i.goal, site: i.site, preferred: i.preferred ?? [] };
     }
     return { name: '', sectors: ['crops'], areaValue: 20, unit: 'sqm', capital: 5000, place: s.profile?.location ?? DEFAULT_PLACE, experience: 'beginner', goal: 'family_sell', site: DEFAULT_SITE, preferred: [] };
   });

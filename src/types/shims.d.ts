@@ -131,6 +131,7 @@ declare module 'node:net' {
   export interface Socket {
     destroyed: boolean; write(s: string): boolean; end(): void; destroy(): void; setEncoding(e: string): void; on(event: string, fn: (...a: any[]) => void): void;
   }
+  export function connect(port: number, host: string): Socket;
   export function createServer(fn: (sock: Socket) => void): {
     listen(port: number, host: string, cb: () => void): void; address(): unknown; close(cb?: () => void): void;
   };

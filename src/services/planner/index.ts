@@ -144,7 +144,8 @@ function chooseCount(sector: Sector, cap: number, bedMode: boolean, slots: numbe
 const NOUN: Record<Sector, string> = { crops: 'Vegetable', fruits: 'Fruit', fish: 'Fish', livestock: 'Livestock' };
 
 function titleFor(input: PlanInput, sectors: Sector[]): string {
-  if (input.name.trim()) return input.name.trim();
+  const name = String(input.name ?? '').trim();
+  if (name) return name;
   const a = input.areaSqm;
   if (sectors.length > 1) {
     const size = a <= 200 ? 'Backyard' : a <= 5000 ? 'Small' : 'Large';

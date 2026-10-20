@@ -44,6 +44,12 @@ try {
 }
 app.announce(port);
 
+// A safety net: a mistake that slips past a try/catch in a request (the request handler is async, so it shows up here) is
+// written to the log, and the server keeps serving everyone else instead of stopping.
+process.on('unhandledRejection', (e) => {
+  log.error(`Unexpected error (the server keeps running): ${e instanceof Error ? e.stack || e.message : String(e)}`);
+});
+
 // Hosting platforms send SIGTERM before they replace a copy of the server (a deploy); Ctrl+C sends SIGINT.
 let stopping = false;
 for (const signal of ['SIGTERM', 'SIGINT']) {

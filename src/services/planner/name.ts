@@ -7,7 +7,8 @@ export const PLAN_NAME_MAX = 60;
 export const cleanPlanName = (name: string) => name.trim().replace(/\s+/g, ' ');
 
 /** How names are compared: capital letters and extra spaces do not make a different name. */
-const nameKey = (name: string) => cleanPlanName(name).normalize('NFKC').toLowerCase();
+// String(...): a plan saved without a name (an edited backup) must not stop the Planner from opening.
+const nameKey = (name: unknown) => cleanPlanName(String(name ?? '')).normalize('NFKC').toLowerCase();
 
 export interface PlanNameProblem {
   message: string;

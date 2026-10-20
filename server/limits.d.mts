@@ -11,6 +11,7 @@ export interface Counters {
   undo(key: string): Promise<void>;
   count(key: string): Promise<number>;
   clear(key: string): Promise<void>;
+  clearPrefix(prefix: string): Promise<void>;
 }
 export function memoryCounters(now?: () => number): Counters;
 export function mongoCounters(database: unknown, now?: () => number): Counters;

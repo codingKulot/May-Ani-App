@@ -89,6 +89,11 @@ export function mongoCounters(database, now = () => Date.now()) {
     async clear(key) {
       await limits.deleteOne({ _id: key });
     },
+    /** Removes every counter whose key starts with `prefix` (letters, digits, ":" and "-" only). */
+    async clearPrefix(prefix) {
+      if (!/^[A-Za-z0-9:-]+$/.test(prefix)) throw new Error('clearPrefix: unsafe prefix');
+      await limits.deleteMany({ _id: { $regex: `^${prefix}` } });
+    },
   };
 }
 
@@ -112,6 +117,9 @@ export function memoryCounters(now = () => Date.now()) {
     },
     async clear(key) {
       all.delete(key);
+    },
+    async clearPrefix(prefix) {
+      for (const k of [...all.keys()]) if (k.startsWith(prefix)) all.delete(k);
     },
   };
 }
