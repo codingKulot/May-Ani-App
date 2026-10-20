@@ -10,3 +10,5 @@ server/data.json.*
 *.log
 # personal Claude Code settings
 .claude/settings.local.json
+# database backups (scripts/backup.ts): password hashes and personal data, never in git
+backups/

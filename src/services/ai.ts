@@ -130,11 +130,12 @@ export interface SiteAnalysis {
   estimatedAreaSqm?: number;
 }
 
-export async function aiSiteAnalysis(req: { sector: Sector; images: ImagePayload[] }): Promise<SiteAnalysis> {
+export async function aiSiteAnalysis(req: { sectors: Sector[]; images: ImagePayload[] }): Promise<SiteAnalysis> {
   return call<SiteAnalysis>('/api/ai/site', {
     method: 'POST',
     body: JSON.stringify({
-      sector: req.sector,
+      // every chosen type, e.g. "crops+fruits+fish" (the server reads up to 60 letters)
+      sector: req.sectors.join('+'),
       images: req.images.map((i) => ({ mediaType: i.mediaType, data: i.data })),
     }),
     headers: paidHeaders(),

@@ -4,7 +4,7 @@ import { buildCustomItem, SECTOR_LABEL } from '@/data/catalog';
 import type { CatalogItem, Sector } from '@/types';
 import { Alert, Button, Field, NumberInput, Sheet, toast } from './ui';
 
-const EXAMPLES: Record<Sector, string> = { crops: 'e.g. Mango, Calamansi, Cassava', fish: 'e.g. Pangasius, Gourami, Shrimp', livestock: 'e.g. Hog, Quail, Duck' };
+const EXAMPLES: Record<Sector, string> = { crops: 'e.g. Cassava, Gabi, Mustasa', fruits: 'e.g. Pomelo, Jackfruit (langka), Avocado', fish: 'e.g. Pangasius, Gourami, Shrimp', livestock: 'e.g. Hog, Quail, Duck' };
 
 /**
  * "Add your own": for anything not on the built-in list. The grower gives a name and the price they expect
@@ -41,7 +41,7 @@ export function CustomItemSheet({ open, onClose, sector, onAdded }: { open: bool
         <details>
           <summary className="small bold" style={{ cursor: 'pointer' }}>More details (optional, makes the plan more accurate)</summary>
           <div className="stack sm" style={{ marginTop: 10 }}>
-            <Field label="Days until first harvest or sale" htmlFor="ci-days"><NumberInput id="ci-days" value={days} min={0} onChange={setDays} /></Field>
+            <Field label="Days until first harvest or sale" htmlFor="ci-days" hint={sector === 'fruits' ? 'For a tree: 1 year = 365 days (up to 10 years).' : undefined}><NumberInput id="ci-days" value={days} min={0} onChange={setDays} /></Field>
             <Field label="Kilos harvested per sqm per cycle" htmlFor="ci-yield"><NumberInput id="ci-yield" value={yieldKg} min={0} onChange={setYieldKg} /></Field>
           </div>
         </details>

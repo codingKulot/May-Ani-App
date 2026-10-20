@@ -256,7 +256,7 @@ export function aiRoutes({ ai, kit: { json, readJson, limited }, gate, log = con
     if (images.length === 0) return json(res, 400, { error: 'Add at least one photo of the area.' });
     const ticket = await gate.take(req, res, 'ai');
     if (!ticket) return;
-    const out = await gate.paid(ticket, () => claude(SITE_SYSTEM, [...images, { type: 'text', text: `Planned use: ${str(b.sector, 20)}. Analyse the site.` }]));
+    const out = await gate.paid(ticket, () => claude(SITE_SYSTEM, [...images, { type: 'text', text: `Planned use: ${str(b.sector, 60)}. Analyse the site.` }]));
     const s = out.site && typeof out.site === 'object' ? out.site : {};
     const found = {};
     if (['flat', 'gentle', 'steep'].includes(s.slope)) found.slope = s.slope;

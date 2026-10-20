@@ -147,6 +147,13 @@ describe('health (offline)', () => {
     const r = diagnoseOffline('shoot wilting and holes in fruit, may uod sa talong', 'plant', 'talong');
     expect(r[0].id).toBe('fsb-eggplant');
   });
+  test('fruit problems (20 October 2026)', () => {
+    expect(diagnoseOffline('maggots inside the ripe mango, soft spot and fruit drop', 'plant', 'Mango')[0].id).toBe('fruit-fly');
+    expect(diagnoseOffline('bunched narrow upright leaves with dark green streaks, stunted, walang bunga', 'plant', 'Banana')[0].id).toBe('banana-bunchy-top');
+    expect(diagnoseOffline('older leaves yellow, leaves collapse like a skirt, split stem with brown streaks inside', 'plant', 'Banana')[0].id).toBe('panama-disease');
+    expect(diagnoseOffline('rings on fruit, mottled yellow leaves, oily streaks', 'plant', 'Papaya')[0].id).toBe('papaya-ringspot');
+    expect(diagnoseOffline('flowers turn black and black spots on the fruit in the rainy season', 'plant', 'Mango')[0].id).toBe('anthracnose');
+  });
   test('sudden poultry deaths surface a reportable disease', () => {
     const r = diagnoseOffline('manok na may twisted neck at biglang namatay, greenish diarrhea', 'animal', 'native_chicken');
     expect(r[0].id).toBe('newcastle');

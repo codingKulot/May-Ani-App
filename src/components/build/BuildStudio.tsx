@@ -10,6 +10,7 @@ import { peso } from '@/lib/format';
 import { aiRenderPicture, aiSiteSurvey, serverStatus, type ServerStatus } from '@/services/ai';
 import { generateDesigns, priceDesign, type BuildDesign, type DesignId, type Surface } from '@/services/build/designs';
 import { buildImagePrompt } from '@/services/build/prompt';
+import { gardenPart } from '@/services/build/garden';
 import type { PlanBuild, SavedPlan } from '@/types';
 import { Alert, Button, Card, Chips, Empty, Spinner, toast } from '@/components/ui';
 import { AiSetupHelp } from '@/components/AiSetupHelp';
@@ -72,12 +73,13 @@ export function BuildStudio({ plan }: { plan: SavedPlan }) {
 
   const surface: Surface = build.surface ?? 'soil';
   const designId: DesignId = build.design ?? 'raised';
-  const { layout, allocations } = plan.result;
-  const isCrops = plan.input.sector === 'crops';
-  const designsFor = (sf: Surface): BuildDesign[] => (isCrops ? generateDesigns({ layout, allocations, surface: sf, sunlight: plan.input.site.sunlight }) : []);
+  // the vegetable garden: the whole plan, or the vegetable beds of a mixed plan
+  const garden = useMemo(() => gardenPart(plan.input, plan.result), [plan.input, plan.result]);
+  const isCrops = !!garden;
+  const designsFor = (sf: Surface): BuildDesign[] => (garden ? generateDesigns({ layout: garden.layout, allocations: garden.allocations, surface: sf, sunlight: plan.input.site.sunlight }) : []);
   const designs = useMemo(
-    () => (isCrops ? generateDesigns({ layout, allocations, surface, sunlight: plan.input.site.sunlight }) : []),
-    [isCrops, plan.input.site.sunlight, layout, allocations, surface],
+    () => (garden ? generateDesigns({ layout: garden.layout, allocations: garden.allocations, surface, sunlight: plan.input.site.sunlight }) : []),
+    [garden, plan.input.site.sunlight, surface],
   );
   const design = designs.find((d) => d.id === designId) ?? designs[0];
   const priced = useMemo(
@@ -90,7 +92,7 @@ export function BuildStudio({ plan }: { plan: SavedPlan }) {
   if (!isCrops || designs.length === 0) {
     return (
       <Card title="Ideas for your site">
-        <Empty icon="🛠️" title="Build ideas are for crop gardens">The pictures, materials list and step-by-step build currently cover vegetable and crop plans up to 600 sqm. Fish and livestock builds are not covered yet.</Empty>
+        <Empty icon="🛠️" title="Build ideas are for vegetable gardens">The pictures, materials list and step-by-step build currently cover vegetable and crop plans up to 600 sqm, and the vegetable part of a mixed plan (up to 600 sqm for that part). Fruit, fish and livestock builds are not covered yet.</Empty>
       </Card>
     );
   }
@@ -166,6 +168,7 @@ export function BuildStudio({ plan }: { plan: SavedPlan }) {
   return (
     <div className="stack">
       <Card title="3 ideas for your site">
+        {garden?.part ? <p className="small muted" style={{ marginBottom: 10 }}>These ideas are for the vegetable beds of your mixed plan (about {garden.areaSqm.toLocaleString()} sqm of land). Fruit, fish and livestock builds are not covered yet.</p> : null}
         {!photo ? (
           <div className="stack">
             <p className="small">Add a photo of the spot where you will build. The AI looks at it and draws 3 different ways to build your garden there, each with its materials and current prices.</p>

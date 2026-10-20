@@ -33,7 +33,7 @@ profile from before is asked to create an account or log in; its farms, plans an
 
 | Feature | Status |
 |---|---|
-| Planner (layout, drainage, water, electrical, costs, phasing) | Deterministic engine, tested (`src/services/planner`). Estimates, not engineering drawings. |
+| Planner (layout, drainage, water, electrical, costs, phasing) | Deterministic engine, tested (`src/services/planner`). Vegetables & crops, fruits, fish, livestock, or any mix of them. Estimates, not engineering drawings. |
 | Weather | Open-Meteo (live, no key). Official warnings: PAGASA (linked). |
 | Earthquakes | USGS feed (live). |
 | Fault lines | **Approximate** bundled traces for orientation. Link to PHIVOLCS FaultFinder / HazardHunterPH. |
@@ -168,6 +168,67 @@ Tests: `tests/sync.test.ts` uses its own throwaway MongoDB and never touches you
 - Number boxes accept what people type, like `1,500` or `₱1,500.50`. Very large amounts (an extra zero?) ask before saving.
 - **Reports > Export CSV** opens correctly in Excel (₱ and ñ show properly), and text that a spreadsheet could run as a formula is made harmless.
 
+## Backing up your data (the database)
+
+The free Atlas plan (M0) keeps **no backups**. If accounts or farm data are deleted by mistake, or the cluster is lost, they are gone.
+`scripts/backup.ts` copies the whole database to this PC. It is free and needs no other program or service.
+
+**Make a backup now** (PowerShell):
+```powershell
+cd $env:USERPROFILE\Documents\Projects\May-Ani
+bun scripts/backup.ts
+```
+It uses `MONGODB_URI` and `MONGODB_DB` from `.env` (the same database as the server) and ends with, for example,
+`Backup saved in backups\2026-10-19-2000 (appdata 12, chat_messages 230, chat_profiles 8, users 12).` The folder name is the date
+and time in the Philippines. If it says `Backup FAILED`, the next words say why (often: this PC's IP address is not allowed under
+Atlas > Network Access, see "Turning on accounts").
+
+What is in a backup: accounts (`users`: names, emails, password hashes, never the passwords), farm data (`appdata`) and chat
+(`chat_profiles`, `chat_messages`), one file per collection, and `manifest.json` (what is in it, and the indexes). Left out on purpose,
+because they only last minutes to days: logins (`sessions`, so after a restore everyone logs in again), reset links, chat tickets and
+counters. `bun scripts/backup.ts --all` copies those too. Photos are not in the database (they stay on the phones).
+
+**Keep backups private.** They hold names, emails, password hashes, farm records and private messages: personal data under the
+Data Privacy Act (RA 10173). The `backups` folder is never put in git or in a container image. Do not email backups or put them
+in a shared folder. A backup on this PC is lost with the PC: now and then, copy the newest folder to a USB drive you keep elsewhere.
+
+**How many are kept:** the newest 14. Older backup folders are deleted by the next backup (only folders the backup made, only in
+`backups\`; anything else you put there is left alone). Each backup is about as big as your data (Atlas > Database > Browse
+Collections shows the size). To keep a different number, add `BACKUP_KEEP=30` to `.env`. Another place: `BACKUP_DIR=D:\May-Ani backups`.
+
+**Every day by itself (Windows Task Scheduler).** Run these lines once in PowerShell:
+```powershell
+cd $env:USERPROFILE\Documents\Projects\May-Ani
+$action = New-ScheduledTaskAction -Execute (Get-Command bun).Source -Argument 'scripts/backup.ts' -WorkingDirectory (Get-Location).Path
+$trigger = New-ScheduledTaskTrigger -Daily -At 8pm
+$settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Hours 1)
+Register-ScheduledTask -TaskName 'May-Ani backup' -Action $action -Trigger $trigger -Settings $settings -Description 'Daily copy of the May-Ani database into the backups folder'
+```
+It runs every day at 8 PM while you are logged in to Windows (a black window shows for a few seconds). If the PC was off at 8 PM,
+it runs soon after you next log in. Change `8pm` to any time you like.
+- Run it now, to try it: `Start-ScheduledTask -TaskName 'May-Ani backup'`, then look for a new folder in `backups\`.
+- Did the last run work? `Get-ScheduledTaskInfo -TaskName 'May-Ani backup'`: `LastTaskResult` 0 means yes. Any other number:
+  run `bun scripts/backup.ts` yourself to see the reason.
+- Remove it: `Unregister-ScheduledTask -TaskName 'May-Ani backup' -Confirm:$false`. If you move the May-Ani folder or reinstall
+  Bun, remove it and make it again.
+
+**Bringing a backup back (restore).** Safest: restore into a NEW database, look at it, then switch the server to it.
+1. `bun scripts/restore.ts latest may_ani_restored` (or a folder name instead of `latest`, like `2026-10-19-2000`). It says what it
+   restored, and it refuses a database that already has data.
+2. Look at it: Atlas > Database > Browse Collections > `may_ani_restored`.
+3. Stop the server (Ctrl+C), set `MONGODB_DB=may_ani_restored` in `.env`, and start it again (`bun run start`). Everyone logs in
+   again with their usual password; their farm data and chats are back. Anything saved after the backup was made is not.
+
+Over the database the server uses (only when you are sure): stop the server, then `bun scripts/restore.ts latest may_ani --force`.
+Each collection in the backup is replaced by the backup's copy; collections not in the backup, like logins, are left as they are.
+
+Good to know: the backup copies one collection after another while the server may be running, so something saved in those
+seconds can be in one collection and not yet in another. Running it in the evening, when few people use the app, is fine.
+Paid alternative: Atlas **Flex** and **dedicated** clusters (M10 and up) have backups built in (automatic snapshots, restore from
+the Atlas website), for a monthly fee; see Atlas's pricing page for today's prices. This script keeps working on those plans too.
+
+Tests: `tests/backup-db.test.ts` uses its own throwaway MongoDB and never touches your database.
+
 ## Putting May-Ani online safely
 
 **Daily AI allowance (your money).** Every AI photo check and every AI picture costs money on your Anthropic / Gemini /
@@ -258,6 +319,25 @@ a selfie, a document) gets a "this photo does not look like a plant, animal or f
 fish photo checked under "Plant" is checked as a fish, with a button to switch tabs. Without AI, the check by
 description still works offline. Optional: `AI_TIMEOUT_MS` (90000) and `AI_RATE_PER_MIN` (15 AI calls per minute per IP).
 
+## The planner: what to grow or raise
+
+Step 2 of **Plan** ("Budget & Goals") asks what you want to grow or raise: **Vegetables & crops**, **Fruits**, **Fish**,
+**Livestock**, or any mix of them (tap more than one). At least one is needed to go on.
+
+- **Your picks per type.** Each chosen type gets its own list (for Fruits: mango, banana, papaya, calamansi, pineapple, dragon fruit,
+  lanzones, rambutan, guava, watermelon) and "Add your own". The plan uses exactly what you pick; a type you pick nothing for gets
+  suggestions, marked "Suggested" in "What ₱X could produce" (tap + to keep one). Turning a type off removes its picks.
+- **Mixed farm = one plot, one budget.** The land is split evenly between the chosen types (the layout shows one strip per type) and
+  the planted area of every type shrinks together until the whole start-up cost fits your capital. The water tank and pump, drainage
+  canal, wiring and permit allowance are shared and counted once. The plan shows how the money splits by type, rounded to ₱100,
+  because these are estimates. A type where nothing suits the site (for example vegetables on a large, heavily shaded plot) is left
+  out with a warning, and the others get its land.
+- **Fruit trees take years.** Yields are per year for trees at bearing age. The plan says how long each one takes before the first
+  harvest (mango about 3½ years, lanzones about 5½), counts that wait in the payback time, and warns that the monthly income is for
+  when everything bears. Fruit prices and yields are **estimates** like the rest of the catalog, not a published list.
+- **Older plans** (made before 20 October 2026, with one type) open and work as before; editing one keeps its type.
+- The build ideas in Layout cover the vegetable beds, also in a mixed plan (when the vegetable part is 600 sqm or less).
+
 ## Layout > "Your garden on your photo" (build studio)
 
 Open a plan, go to **Layout**. The studio draws the plan on your own site photo, offers three buildable
@@ -271,7 +351,7 @@ recycling how-tos, and measured build steps with a cut list.
   items (grow bags, cocopeat, soil, shade net, drip kits, seeds) are **typical-range estimates**, labelled
   "Estimate". Nothing is a live feed. Type "my price" on any line to use your own quote.
 - **Recycling** (`src/data/recyclables.ts`): tick what you have; each item says which purchase it replaces and how much.
-- Currently for vegetable and crop plans up to 600 sqm. Fish and livestock builds are not covered yet.
+- Currently for vegetable and crop plans up to 600 sqm, and the vegetable beds of a mixed plan (that part up to 600 sqm). Fruit, fish and livestock builds are not covered yet.
 
 
 ## Layout: 3 ideas from your photo (optional AI pictures)

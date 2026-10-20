@@ -1,11 +1,11 @@
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 import { LuArrowLeft, LuCheck, LuPencil, LuTrash2 } from 'react-icons/lu';
 import { Link, navigate } from '@/core/router';
 import { useAppState } from '@/core/store';
 import { deletePlan, savePlanAsFarm } from '@/core/actions';
-import { catalogById } from '@/data/catalog';
+import { catalogById, planSectors, plantsLabel, SECTOR_LABEL, waitLabel } from '@/data/catalog';
 import { peso } from '@/lib/format';
-import { ForecastCard } from '@/components/ForecastCard';
+import { BudgetSplit, ForecastCard } from '@/components/ForecastCard';
 import { Alert, Badge, Button, Card, Empty, LinkButton, Stat, Tabs, askConfirm, toast } from '@/components/ui';
 import { PlanLayout } from '@/components/PlanLayout';
 import { BuildStudio } from '@/components/build/BuildStudio';
@@ -25,6 +25,9 @@ export function PlanDetail({ id }: { id: string }) {
   const { input, result: r } = plan;
   const farm = plan.farmId ? farms.find((f) => f.id === plan.farmId) : undefined;
   const items = r.allocations.map((a) => ({ a, item: catalogById(a.itemId)! })).filter((x) => x.item);
+  const sectors = planSectors(input);
+  const blocksOf = (itemId: string) => r.layout.rects.filter((x) => x.itemId === itemId && x.kind === 'orchard');
+  const mixed = sectors.length > 1;
   const unit = input.areaSqm >= 10000 ? `${(input.areaSqm / 10000).toFixed(2)} ha` : `${input.areaSqm} sq. meters`;
 
   const save = () => {
@@ -49,6 +52,7 @@ export function PlanDetail({ id }: { id: string }) {
           <div>
             <h2 style={{ marginBottom: 4 }}>{r.title}</h2>
             <p className="small muted">{unit} · {peso(input.capital)} budget · {input.location.name}, {input.location.province}</p>
+            <div className="row wrap" style={{ gap: 6, marginTop: 6 }} aria-label="Types in this plan">{sectors.map((x) => <Badge key={x} tone="gray">{SECTOR_LABEL[x]}</Badge>)}</div>
           </div>
           {farm ? <Badge><LuCheck size={12} /> Saved to My Farm</Badge> : <Badge tone="orange">Draft</Badge>}
         </div>
@@ -68,15 +72,18 @@ export function PlanDetail({ id }: { id: string }) {
           {items.length > 0 ? (
             <Card title="Recommended for you">
               <div className="list">
-                {items.map(({ a, item }) => (
-                  <div key={item.id} className="item" style={{ alignItems: 'flex-start' }}>
+                {items.map(({ a, item }, k) => (
+                  <Fragment key={item.id}>
+                  {mixed && item.sector !== items[k - 1]?.item.sector ? <div className="small bold muted" style={{ paddingTop: k ? 6 : 0 }}>{SECTOR_LABEL[item.sector]}</div> : null}
+                  <div className="item" style={{ alignItems: 'flex-start' }}>
                     <span className="thumb">{item.emoji}</span>
                     <div className="grow">
                       <div className="row between"><span className="bold">{item.name}{item.localName ? <span className="muted small"> · {item.localName}</span> : null}</span><Badge tone={item.difficulty === 1 ? 'green' : item.difficulty === 2 ? 'orange' : 'red'}>{DIFF[item.difficulty]}</Badge></div>
-                      <div className="small muted">{a.areaSqm} sqm · first {item.sector === 'crops' ? 'harvest' : 'sale'} in about {item.daysToHarvest} days · ≈ {Math.round(a.areaSqm * item.yieldKgPerSqm)} kg per cycle at {peso(item.farmGatePerKg)}/kg</div>
+                      <div className="small muted">{a.areaSqm} sqm{plantsLabel(item, a.areaSqm, blocksOf(item.id)) ? ` (${plantsLabel(item, a.areaSqm, blocksOf(item.id))})` : ''} · first {item.sector === 'crops' || item.sector === 'fruits' ? 'harvest' : 'sale'} in {waitLabel(item.daysToHarvest)} · ≈ {Math.round(a.areaSqm * item.yieldKgPerSqm)} kg {item.sector === 'fruits' && item.cycleDays === 365 ? 'a year once bearing' : 'per cycle'} at {peso(item.farmGatePerKg)}/kg</div>
                       <div className="small" style={{ marginTop: 2 }}>{item.notes}</div>
                     </div>
                   </div>
+                  </Fragment>
                 ))}
               </div>
             </Card>
@@ -88,6 +95,7 @@ export function PlanDetail({ id }: { id: string }) {
               <Stat label="Monthly operating cost" value={peso(r.cost.monthlyOperating)} />
               <Stat label="Est. monthly income" value={`${peso(r.cost.monthlyIncomeMin)} – ${peso(r.cost.monthlyIncomeMax)}`} tone="blue" sub={r.cost.paybackMonths ? `Payback ≈ ${r.cost.paybackMonths} months` : 'No payback at these assumptions'} />
             </div>
+            {r.split ? <><hr className="sep" /><BudgetSplit split={r.split} /></> : null}
             <p className="disclaimer" style={{ marginTop: 12 }}>{r.assumptions[0]}</p>
           </Card>
 
@@ -157,8 +165,8 @@ export function PlanDetail({ id }: { id: string }) {
       ) : null}
 
       {tab === 'schedule' ? (
-        <Card title="Your first weeks">
-          <div className="timeline">{r.schedule.map((t, i) => <div className="t" key={i}><span className="wk">Week {t.week}</span><div><div className="bold">{t.title}</div><div className="small muted">{t.detail}</div></div></div>)}</div>
+        <Card title={r.schedule.some((t) => t.week > 52) ? 'Your schedule' : 'Your first weeks'}>
+          <div className="timeline">{r.schedule.map((t, i) => <div className="t" key={i}><span className="wk">{t.week > 52 ? `Year ${Math.ceil(t.week / 52)}` : `Week ${t.week}`}</span><div><div className="bold">{t.title}</div><div className="small muted">{t.detail}</div></div></div>)}</div>
         </Card>
       ) : null}
     </div>

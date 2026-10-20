@@ -4,7 +4,8 @@ import type { Quad } from '@/services/build/geometry';
 /** Props we pass to react-icons components. */
 export type AppIcon = (props: { size?: number | string; color?: string; className?: string; style?: Record<string, string | number> }) => any;
 
-export type Sector = 'crops' | 'fish' | 'livestock';
+/** What a farm grows or raises. 'fruits' was added on 20 October 2026 (fruit trees, banana, papaya, pineapple, watermelon...). */
+export type Sector = 'crops' | 'fruits' | 'fish' | 'livestock';
 export type Experience = 'beginner' | 'intermediate' | 'advanced';
 export type Goal = 'family' | 'family_sell' | 'commercial';
 
@@ -32,7 +33,10 @@ export interface Profile {
 export interface Farm {
   id: string;
   name: string;
+  /** the main type (the first of `sectors` for a mixed farm) */
   sector: Sector;
+  /** every type on this farm, only when it has more than one (a mixed plan saved as a farm) */
+  sectors?: Sector[];
   areaSqm: number;
   location: GeoPlace;
   planId?: string;
@@ -80,8 +84,12 @@ export interface CatalogItem {
   maxAreaSqm?: number;
   /** prefers cool highland climate */
   prefersCool?: boolean;
-  /** how the unit of area is used: bed, pond, house */
-  areaKind: 'bed' | 'pond' | 'house';
+  /** fruits: area one tree / mat / post / plant takes at the usual spacing (sqm), to show "about N trees" */
+  perPlantSqm?: number;
+  /** fruits: grows well in partial shade (e.g. lanzones under coconut) */
+  shadeTolerant?: boolean;
+  /** how the unit of area is used: bed, pond, house, orchard */
+  areaKind: 'bed' | 'pond' | 'house' | 'orchard';
   notes: string;
   /** added by the user (not part of the built-in catalog) */
   custom?: boolean;
@@ -105,7 +113,13 @@ export interface SiteConditions {
 
 export interface PlanInput {
   name: string;
+  /**
+   * The first chosen type. Plans made before 20 October 2026 have only this; it is still written so older copies of the
+   * app can read new plans. Read the types of a plan with `planSectors(input)` (data/catalog.ts), never this alone.
+   */
   sector: Sector;
+  /** every type chosen (one or more, in SECTORS order), since 20 October 2026 */
+  sectors?: Sector[];
   areaSqm: number;
   capital: number;
   location: GeoPlace;
@@ -134,7 +148,7 @@ export interface LayoutRect {
   y: number;
   w: number;
   h: number;
-  kind: 'bed' | 'pond' | 'house' | 'path' | 'tank' | 'canal' | 'power' | 'pump' | 'run';
+  kind: 'bed' | 'pond' | 'house' | 'orchard' | 'path' | 'tank' | 'canal' | 'power' | 'pump' | 'run';
   itemId?: string;
   label?: string;
 }
@@ -145,6 +159,8 @@ export interface LayoutSpec {
   rects: LayoutRect[];
   lowSide: 'N' | 'E' | 'S' | 'W';
   legend: { itemId: string; areaSqm: number }[];
+  /** mixed plans only: the strip of the plot each type gets (metres) */
+  zones?: { sector: Sector; x: number; y: number; w: number; h: number }[];
 }
 
 export interface WaterPlan {
@@ -200,6 +216,25 @@ export interface PlanResult {
   schedule: ScheduleItem[];
   warnings: string[];
   assumptions: string[];
+  /** mixed plans only (more than one type): land and start-up money per type */
+  split?: PlanSplit;
+}
+
+/** How a mixed plan shares the land and the start-up money between its types. */
+export interface PlanSplit {
+  zones: PlanZone[];
+  /** water tank and pump, drainage, wiring or solar, permits (with their part of the 10% contingency): shared by all types */
+  shared: number;
+}
+
+export interface PlanZone {
+  sector: Sector;
+  /** land set aside for this type (an even share of the plot) */
+  landSqm: number;
+  /** planted or built area of this type in this phase */
+  usedAreaSqm: number;
+  /** start-up cost of this type's own part (set-up, beds or ponds, piping, tools, working capital, its part of the contingency) */
+  initial: number;
 }
 
 /** What the user chose in the Layout > Build studio. The photo itself lives in IndexedDB (lib/photoStore). */

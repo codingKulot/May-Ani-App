@@ -168,6 +168,78 @@ export const DISEASES: DiseaseEntry[] = [
     prevention: ['Use resistant varieties.', 'Balanced fertilization.', 'Clean seed and field sanitation.'],
     seeExpert: true,
   },
+  // fruits (added 20 October 2026 with the Fruits type)
+  {
+    id: 'fruit-fly', kind: 'plant', name: 'Fruit fly (maggots in fruit)',
+    subjects: ['mango', 'guava', 'papaya', 'bayabas', 'mangga', 'ampalaya', 'patola'],
+    keywords: ['maggots', 'uod sa bunga', 'worms in fruit', 'fruit fly', 'langaw', 'soft spot', 'puncture', 'rotting fruit', 'nabubulok na bunga', 'fruit drop', 'nalalaglag na bunga'],
+    summary: 'Small punctures on the skin, soft rotting patches and white maggots inside the fruit are typical of fruit flies, a major pest of mango, guava and other fruits.',
+    causes: 'Female flies lay eggs under the skin of ripening fruit; the larvae feed inside. Fallen fruit left on the ground breeds the next generation.',
+    actions: [
+      'Pick up fallen and infested fruit every day; seal it in bags or bury it deep so the maggots cannot finish growing.',
+      'Bag young fruits (paper or newspaper bags) well before they start to ripen.',
+      'Ask your municipal agriculture office about fruit fly lure traps and area-wide control with your neighbours.',
+      'Harvest at the right stage; do not leave ripe fruit hanging.',
+    ],
+    prevention: ['Keep the orchard floor clean of fallen fruit.', 'Bag fruits every season.', 'Coordinate trapping with nearby growers.'],
+    seeExpert: false,
+  },
+  {
+    id: 'anthracnose', kind: 'plant', name: 'Anthracnose (black spots on flowers, leaves and fruit)',
+    subjects: ['mango', 'mangga', 'papaya', 'banana', 'saging', 'dragon fruit'],
+    keywords: ['black spots', 'itim na batik', 'blossom blight', 'flowers turn black', 'nangingitim ang bulaklak', 'sunken spots', 'fruit rot', 'spots on fruit', 'rainy season', 'dark lesions'],
+    summary: 'Black, sunken spots on fruit, blackened flower clusters or dark leaf spots in wet weather suggest anthracnose, the most common disease of mango in the Philippines.',
+    causes: 'A fungus spread by rain splash; flowering and fruiting in rainy, humid weather make it much worse.',
+    actions: [
+      'Prune crowded branches so the canopy dries faster, and remove badly infected flowers, leaves and fruit.',
+      'Bag fruits once they set.',
+      'Ask your DA technician about timing flower induction for drier months and about an FPA-registered fungicide; follow the label and waiting period.',
+    ],
+    prevention: ['Prune after each harvest.', 'Clean up fallen leaves and fruit.', 'Avoid flowering during the peak rainy months where you can.'],
+    seeExpert: false,
+  },
+  {
+    id: 'banana-bunchy-top', kind: 'plant', name: 'Banana bunchy top virus',
+    subjects: ['banana', 'saging', 'lakatan', 'saba'],
+    keywords: ['bunchy', 'bunched leaves', 'narrow leaves', 'upright leaves', 'dark green streaks', 'morse code', 'stunted', 'bansot', 'no bunch', 'walang bunga', 'aphids'],
+    summary: 'New leaves that come out narrow, short and bunched together at the top, with dark green dot-and-dash streaks on the leaf stalks and veins, point to bunchy top, a virus with no cure.',
+    causes: 'A virus spread by the banana aphid and by suckers taken from infected mats.',
+    actions: [
+      'Do not take suckers from this mat or nearby mats.',
+      'Ask your municipal agriculturist how to kill and remove the whole infected mat, including suckers, and control the aphids first so they do not fly to healthy plants.',
+      'Tell your municipal agriculturist so neighbouring farms can check their bananas too.',
+    ],
+    prevention: ['Plant tissue-culture plantlets or suckers from clean, inspected mats.', 'Check young plants every week and act early.', 'Control aphids.'],
+    seeExpert: true,
+  },
+  {
+    id: 'panama-disease', kind: 'plant', name: 'Fusarium wilt of banana (Panama disease) - possible',
+    subjects: ['banana', 'saging', 'lakatan', 'cavendish'],
+    keywords: ['yellowing from the edges', 'older leaves yellow', 'leaves collapse', 'hanging leaves', 'skirt', 'split stem', 'brown streaks inside', 'red streaks', 'nalanta', 'naninilaw', 'wilt'],
+    summary: 'Older leaves turning yellow from the edges and then collapsing around the stem like a skirt, a split stem and brown or reddish streaks inside a cut stem suggest Fusarium wilt, a soil disease that stays in the ground for decades.',
+    causes: 'A soil fungus that enters through the roots and moves with soil on boots, tools, vehicles, water and infected planting material.',
+    actions: [
+      'Do not move soil, plants or suckers from this spot; keep people and animals out of it.',
+      'Clean and disinfect tools and footwear before leaving the area.',
+      'Contact your municipal agriculturist or the Bureau of Plant Industry quickly: they confirm the disease and say how to destroy infected plants safely.',
+    ],
+    prevention: ['Plant tissue-culture plantlets from accredited sources.', 'Use footbaths and clean tools at the farm entrance.', 'Never bring soil or suckers from other farms.'],
+    seeExpert: true,
+  },
+  {
+    id: 'papaya-ringspot', kind: 'plant', name: 'Papaya ringspot virus',
+    subjects: ['papaya'],
+    keywords: ['ringspot', 'rings on fruit', 'mosaic', 'mottled', 'yellow patches', 'distorted leaves', 'shoestring', 'oily streaks', 'kulubot na dahon', 'batik-batik'],
+    summary: 'Yellow mottled, wrinkled or very narrow leaves, oily streaks on the stem and dark rings on the fruit are signs of papaya ringspot virus, which has no cure.',
+    causes: 'A virus spread by aphids from sick papaya to healthy trees.',
+    actions: [
+      'Cut down and remove infected trees early, before aphids spread the virus to the rest.',
+      'Replant with healthy seedlings, ideally away from old infected areas.',
+      'Ask your DA technician about tolerant varieties for your area.',
+    ],
+    prevention: ['Start with healthy seedlings.', 'Check trees every week and remove sick ones at once.', 'Replant every 2 to 3 years.'],
+    seeExpert: false,
+  },
 
   // ------------------------------- ANIMALS -------------------------------
   {

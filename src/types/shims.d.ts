@@ -66,7 +66,7 @@ declare namespace JSX {
   interface IntrinsicAttributes { key?: string | number }
   type Element = any;
 }
-declare const process: { env: Record<string, string | undefined>; execPath: string };
+declare const process: { env: Record<string, string | undefined>; execPath: string; argv: string[]; exit(code?: number): never };
 
 declare module 'bun:test' {
   export const describe: {
@@ -88,25 +88,42 @@ declare module 'node:fs' {
   export function readFileSync(path: string | URL, encoding: 'utf8'): string;
   export function writeFileSync(path: string, data: string | Uint8Array): void;
   export function copyFileSync(from: string, to: string): void;
-  export function mkdirSync(path: string): void;
+  export function mkdirSync(path: string, opts?: { recursive?: boolean }): void;
   export function readdirSync(path: string): string[];
   export function existsSync(path: string): boolean;
   export function mkdtempSync(prefix: string): string;
   export function rmSync(path: string, opts?: { recursive?: boolean; force?: boolean }): void;
+  // Used by scripts/backup.ts and scripts/restore.ts.
+  export function renameSync(from: string, to: string): void;
+  export function statSync(path: string): { mtimeMs: number; isDirectory(): boolean };
+  export function utimesSync(path: string, atime: Date | number, mtime: Date | number): void;
+  export function openSync(path: string, flags: string): number;
+  export function writeSync(fd: number, data: string): number;
+  export function fsyncSync(fd: number): void;
+  export function closeSync(fd: number): void;
+  export function createReadStream(path: string): unknown;
 }
 declare module 'node:os' {
   export function tmpdir(): string;
 }
 declare module 'node:path' {
   export function join(...parts: string[]): string;
+  export function resolve(...parts: string[]): string;
+  export function relative(from: string, to: string): string;
+  export function basename(path: string): string;
 }
+declare module 'node:readline' {
+  export function createInterface(opts: { input: unknown; crlfDelay?: number }): AsyncIterable<string> & { close(): void };
+}
+/** Bun: true when this file is the script that was run (not imported). */
+interface ImportMeta { readonly main: boolean }
 declare module 'node:url' {
   export function fileURLToPath(url: string | URL): string;
 }
 declare module 'node:child_process' {
   interface Stream { on(event: 'data', fn: (chunk: any) => void): void }
   export function spawn(cmd: string, args: string[], opts?: { cwd?: string; env?: Record<string, string | undefined>; stdio?: any }): {
-    stdout: Stream; stderr: Stream; exitCode: number | null; kill(): boolean;
+    stdout: Stream; stderr: Stream; exitCode: number | null; kill(): boolean; on(event: 'close', fn: (code: number | null) => void): void;
   };
 }
 // Used by the fake mail server and the Host-header test (tests/support).

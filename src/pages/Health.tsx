@@ -20,7 +20,7 @@ const KINDS: { id: HealthKind; label: string }[] = [
 const A_KIND: Record<HealthKind, string> = { plant: 'a plant', animal: 'an animal', fish: 'a fish' };
 const kindLabel = (k: HealthKind) => KINDS.find((x) => x.id === k)!.label;
 const subjectsFor = (k: HealthKind) =>
-  allItems().filter((c) => (k === 'plant' ? c.sector === 'crops' : k === 'fish' ? c.sector === 'fish' : c.sector === 'livestock')).map((c) => c.name);
+  allItems().filter((c) => (k === 'plant' ? c.sector === 'crops' || c.sector === 'fruits' : k === 'fish' ? c.sector === 'fish' : c.sector === 'livestock')).map((c) => c.name);
 
 /** Photos are sent at up to 1568 px on the long side: the whole photo, never cropped, with enough detail for small spots. */
 const PHOTO_MAX_PX = 1568;

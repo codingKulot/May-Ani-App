@@ -6,7 +6,7 @@ import {
 import { Link } from '@/core/router';
 import { useAppState } from '@/core/store';
 import { useWeather } from '@/core/hooks';
-import { catalogById } from '@/data/catalog';
+import { catalogById, planSectors, sectorsLabel } from '@/data/catalog';
 import { placeLabel } from '@/data/places';
 import { verseForDate } from '@/data/verses';
 import { addDays, daysBetween, greeting, isoDate, peso, prettyDate, sum, timeAgo } from '@/lib/format';
@@ -42,7 +42,7 @@ export function Dashboard() {
 
   const prod = s.production.filter((p) => {
     const sector = catalogById(p.itemId)?.sector;
-    return prodTab === 'crops' ? sector === 'crops' || sector === 'livestock' : sector === 'fish';
+    return prodTab === 'crops' ? !!sector && sector !== 'fish' : sector === 'fish';
   });
 
   const activity = useMemo(() => {
@@ -126,7 +126,7 @@ export function Dashboard() {
                 {s.farms.slice(0, 3).map((f) => (
                   <Link key={f.id} to={`/farms/${f.id}`} className="item">
                     <span className="thumb"><LuSprout size={22} color="#0f6b3a" /></span>
-                    <div className="grow"><div className="bold">{f.name}</div><div className="small muted">{f.sector === 'crops' ? 'Vegetables/crops' : f.sector === 'fish' ? 'Aquaculture' : 'Livestock'} · {f.areaSqm >= 10000 ? `${(f.areaSqm / 10000).toFixed(2)} ha` : `${f.areaSqm} sqm`}</div></div>
+                    <div className="grow"><div className="bold">{f.name}</div><div className="small muted">{sectorsLabel(planSectors(f))} · {f.areaSqm >= 10000 ? `${(f.areaSqm / 10000).toFixed(2)} ha` : `${f.areaSqm} sqm`}</div></div>
                   </Link>
                 ))}
               </div>
@@ -134,7 +134,7 @@ export function Dashboard() {
           </Card>
 
           <Card title="Production overview">
-            <Tabs tabs={[{ id: 'crops', label: 'Crops & livestock' }, { id: 'aqua', label: 'Aquaculture' }]} value={prodTab} onChange={setProdTab} />
+            <Tabs tabs={[{ id: 'crops', label: 'Crops, fruits & livestock' }, { id: 'aqua', label: 'Aquaculture' }]} value={prodTab} onChange={setProdTab} />
             {prod.length === 0 ? (
               <Empty icon="🌾" title="Nothing in production here yet" action={<LinkButton to="/manage/production" variant="secondary" size="sm">Add a production record</LinkButton>} />
             ) : (

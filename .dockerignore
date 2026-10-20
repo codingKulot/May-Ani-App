@@ -10,3 +10,5 @@ dist
 .github
 .claude
 *.log
+# database backups (scripts/backup.ts): password hashes and personal data
+backups

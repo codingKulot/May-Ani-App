@@ -1,19 +1,21 @@
 import { Fragment, useEffect, useMemo, useState } from 'react';
-import { LuFish, LuImagePlus, LuLeaf, LuPlus, LuSparkles, LuTractor, LuX } from 'react-icons/lu';
-import { navigate } from '@/core/router';
+import type { ReactNode } from 'react';
+import { LuApple, LuFish, LuImagePlus, LuLeaf, LuPlus, LuSparkles, LuTractor, LuX } from 'react-icons/lu';
+import { Link, navigate } from '@/core/router';
 import { getState } from '@/core/store';
 import { useAppState } from '@/core/store';
-import { removeCustomItem, savePlanDraft, updatePlanBuild } from '@/core/actions';
+import { removeCustomItem, replacePlan, savePlanDraft } from '@/core/actions';
 import { DEFAULT_PLACE } from '@/data/places';
-import { SECTOR_LABEL, catalogById, itemsFor } from '@/data/catalog';
+import { SECTORS, SECTOR_LABEL, catalogById, itemsFor, planSectors } from '@/data/catalog';
 import { generatePlan } from '@/services/planner';
+import { PLAN_NAME_MAX, cleanPlanName, planNameProblem } from '@/services/planner/name';
 import { aiSiteAnalysis, serverStatus, type ServerStatus } from '@/services/ai';
 import { fileToImagePayload, type ImagePayload } from '@/lib/image';
-import { loadPhotos, savePhotos, toPayload, toStored } from '@/lib/photoStore';
+import { deletePhotos, loadPhotos, savePhotos, toPayload, toStored } from '@/lib/photoStore';
 import { peso } from '@/lib/format';
 import { useDebounced } from '@/core/hooks';
 import type { Experience, GeoPlace, Goal, PlanInput, PlanResult, Sector, SiteConditions } from '@/types';
-import { Alert, Button, Card, Chips, Field, NumberInput, PageHeader, Sheet, Spinner, Tabs, toast } from '@/components/ui';
+import { Alert, Button, Card, Chips, Field, NumberInput, PageHeader, Sheet, Spinner, Tabs, ToggleChips, toast } from '@/components/ui';
 import { PlaceSelect } from '@/components/widgets';
 import { CustomItemSheet } from '@/components/CustomItemSheet';
 import { ForecastCard } from '@/components/ForecastCard';
@@ -24,9 +26,19 @@ const DEFAULT_SITE: SiteConditions = {
   slope: 'gentle', waterSource: 'municipal', power: 'grid', floodProne: false, sunlight: 'full', brackishWater: false, cool: false,
 };
 
+const TYPE_CHOICES: { id: Sector; label: string; icon: ReactNode }[] = [
+  { id: 'crops', label: 'Vegetables & crops', icon: <LuLeaf size={16} /> },
+  { id: 'fruits', label: 'Fruits', icon: <LuApple size={16} /> },
+  { id: 'fish', label: 'Fish', icon: <LuFish size={16} /> },
+  { id: 'livestock', label: 'Livestock', icon: <LuTractor size={16} /> },
+];
+const PICK_LABEL: Record<Sector, string> = { crops: 'Which vegetables & crops?', fruits: 'Which fruits?', fish: 'Which fish?', livestock: 'Which livestock & poultry?' };
+const NO_TYPE = 'Choose at least one: vegetables & crops, fruits, fish or livestock.';
+
 interface Draft {
   name: string;
-  sector: Sector;
+  /** one or more types, in SECTORS order */
+  sectors: Sector[];
   areaValue: number;
   unit: 'sqm' | 'ha';
   capital: number;
@@ -46,9 +58,10 @@ export function Planner({ editId }: { editId?: string }) {
     const edit = editId ? getState().plans.find((p) => p.id === editId) : undefined;
     if (edit) {
       const i = edit.input;
-      return { name: i.name, sector: i.sector, areaValue: i.areaSqm, unit: 'sqm', capital: i.capital, place: i.location, experience: i.experience, goal: i.goal, site: i.site, preferred: i.preferred ?? [] };
+      // plans made before a name was required keep the title they were shown with
+      return { name: i.name.trim() || edit.result.title, sectors: planSectors(i), areaValue: i.areaSqm, unit: 'sqm', capital: i.capital, place: i.location, experience: i.experience, goal: i.goal, site: i.site, preferred: i.preferred ?? [] };
     }
-    return { name: '', sector: 'crops', areaValue: 20, unit: 'sqm', capital: 5000, place: s.profile?.location ?? DEFAULT_PLACE, experience: 'beginner', goal: 'family_sell', site: DEFAULT_SITE, preferred: [] };
+    return { name: '', sectors: ['crops'], areaValue: 20, unit: 'sqm', capital: 5000, place: s.profile?.location ?? DEFAULT_PLACE, experience: 'beginner', goal: 'family_sell', site: DEFAULT_SITE, preferred: [] };
   });
   const [photos, setPhotos] = useState<ImagePayload[]>([]);
   const [measureTab, setMeasureTab] = useState<'photo' | 'map'>('map');
@@ -59,10 +72,11 @@ export function Planner({ editId }: { editId?: string }) {
   const [server, setServer] = useState<ServerStatus | null | undefined>(undefined); // undefined = still checking
   useEffect(() => { serverStatus().then(setServer); }, []);
   // editing an existing plan: bring its photos back so they are not lost when the plan is regenerated
+  const [photosLoaded, setPhotosLoaded] = useState(!editId);
   useEffect(() => {
     if (!editId) return;
     let alive = true;
-    loadPhotos(editId).then((p) => { if (alive && p.length) setPhotos(p.map(toPayload)); });
+    loadPhotos(editId).then((p) => { if (!alive) return; if (p.length) setPhotos(p.map(toPayload)); setPhotosLoaded(true); });
     return () => { alive = false; };
   }, [editId]);
   const [aiArea, setAiArea] = useState<number | null>(null);
@@ -93,7 +107,7 @@ export function Planner({ editId }: { editId?: string }) {
       setServer(st);
       if (!st) throw new Error('Not connected yet. Follow the steps below, then tap Analyse again. You can also answer the quick questions below and still get a full plan.');
       if (!st.ai) throw new Error('The server is running but has no AI key yet. Follow the steps below, then tap Analyse again.');
-      const out = await aiSiteAnalysis({ sector: draft.sector, images: photos });
+      const out = await aiSiteAnalysis({ sectors: draft.sectors, images: photos });
       setAiNotes(out.notes);
       setDraft((d) => ({ ...d, site: { ...d.site, ...out.site } }));
       if (out.estimatedAreaSqm) setAiArea(out.estimatedAreaSqm);
@@ -105,45 +119,67 @@ export function Planner({ editId }: { editId?: string }) {
     }
   };
 
-  const valid1 = area > 0;
-  const valid2 = draft.capital >= 0;
+  // The project name is required and must differ from the account's other plans (services/planner/name.ts). An empty name is
+  // pointed out once the box was left; a name that is already used is pointed out at once, while typing.
+  const [nameLeft, setNameLeft] = useState(false);
+  const nameProblem = useMemo(() => planNameProblem(draft.name, s.plans, editId), [draft.name, s.plans, editId]);
+  const showNameProblem = !!nameProblem && (nameLeft || !!nameProblem.existing);
+
+  const valid1 = area > 0 && !nameProblem;
+  const valid2 = draft.capital >= 0 && draft.sectors.length > 0;
 
   const generate = () => {
+    // checked again: another phone may have saved a plan with this name while this one was being filled in
+    const problem = planNameProblem(draft.name, getState().plans, editId);
+    if (problem) {
+      setNameLeft(true);
+      setStep(1);
+      toast(problem.message);
+      return;
+    }
     setBusy(true);
     // yield a frame so the busy state paints before the (synchronous) engine runs
     setTimeout(async () => {
       const input: PlanInput = {
-        name: draft.name, sector: draft.sector, areaSqm: area, capital: draft.capital, location: draft.place,
+        name: cleanPlanName(draft.name), sector: draft.sectors[0], sectors: draft.sectors, areaSqm: area, capital: draft.capital, location: draft.place,
         experience: draft.experience, goal: draft.goal, site: draft.site, preferred: draft.preferred, photoCount: photos.length, aiSiteNotes: aiNotes,
       };
       const result = generatePlan(input);
-      const saved = savePlanDraft(input, result);
-      if (photos.length) {
-        await savePhotos(saved.id, photos.map(toStored));
-        // when editing, keep the floor corners and choices the user already made for this site
-        const old = editId ? getState().plans.find((p) => p.id === editId)?.build : undefined;
-        if (old) updatePlanBuild(saved.id, old);
-      }
+      // Editing changes the same plan (it keeps its farm link, floor corners and build choices); a new plan is added only
+      // when there is none to edit (for example it was deleted on another phone meanwhile).
+      const edited = editId ? replacePlan(editId, input, result) : null;
+      const saved = edited ?? savePlanDraft(input, result);
+      if (photos.length) await savePhotos(saved.id, photos.map(toStored));
+      else if (edited && photosLoaded) await deletePhotos(saved.id); // every photo was removed while editing (the pictures drawn on them go too)
       setBusy(false);
       navigate(`/plan/${saved.id}`);
     }, 50);
   };
 
-  const sectorItems = itemsFor(draft.sector);
   // live preview for step 2: re-runs the planner (a few ms) shortly after the user stops typing
   const liveDraft = useDebounced(draft, 250);
   const preview = useMemo<PlanResult | null>(() => {
-    if (step !== 2 || toSqm(liveDraft) <= 0 || !(liveDraft.capital > 0)) return null;
+    if (step !== 2 || toSqm(liveDraft) <= 0 || !(liveDraft.capital > 0) || liveDraft.sectors.length === 0) return null;
     try {
       return generatePlan({
-        name: liveDraft.name, sector: liveDraft.sector, areaSqm: toSqm(liveDraft), capital: liveDraft.capital, location: liveDraft.place,
+        name: liveDraft.name, sector: liveDraft.sectors[0], sectors: liveDraft.sectors, areaSqm: toSqm(liveDraft), capital: liveDraft.capital, location: liveDraft.place,
         experience: liveDraft.experience, goal: liveDraft.goal, site: liveDraft.site, preferred: liveDraft.preferred, photoCount: 0,
       });
     } catch { return null; }
   }, [step, liveDraft, s.customItems]);
-  const [addOpen, setAddOpen] = useState(false);
+  const [addFor, setAddFor] = useState<Sector | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const togglePreferred = (id: string) => set('preferred', draft.preferred.includes(id) ? draft.preferred.filter((x) => x !== id) : [...draft.preferred, id]);
+  // any mix of types; turning one off drops its picks, so the plan never carries items of a type that is not chosen
+  const toggleSector = (id: Sector) => setDraft((d) => {
+    const sectors = d.sectors.includes(id) ? d.sectors.filter((x) => x !== id) : SECTORS.filter((x) => x === id || d.sectors.includes(x));
+    return { ...d, sectors, preferred: d.preferred.filter((p) => sectors.includes(catalogById(p)?.sector as Sector)) };
+  });
+  const mixed = draft.sectors.length > 1;
+  const landEach = mixed && area > 0 ? Math.round(area / draft.sectors.length) : 0;
+  const pickChip = (i: ReturnType<typeof itemsFor>[number]) => (
+    <button key={i.id} type="button" className={`chip ${draft.preferred.includes(i.id) ? 'on' : ''}`} aria-pressed={draft.preferred.includes(i.id)} onClick={() => togglePreferred(i.id)}>{i.emoji} {i.name}</button>
+  );
 
   return (
     <div className="page narrow">
@@ -201,8 +237,17 @@ export function Planner({ editId }: { editId?: string }) {
                     </select>
                   </div>
                 </Field>
-                <Field label="Project name (optional)" htmlFor="pname">
-                  <input id="pname" className="input" value={draft.name} placeholder="e.g. Backyard garden" onChange={(e) => set('name', e.target.value)} />
+                <Field label="Project name" htmlFor="pname">
+                  <input
+                    id="pname" className="input" value={draft.name} placeholder="e.g. Backyard garden" maxLength={PLAN_NAME_MAX} required autoComplete="off"
+                    aria-invalid={showNameProblem ? true : undefined} aria-describedby={showNameProblem ? 'pname-problem' : undefined}
+                    onChange={(e) => set('name', e.target.value)} onBlur={() => setNameLeft(true)}
+                  />
+                  {showNameProblem ? (
+                    <span id="pname-problem" className="field-error" role="alert">
+                      {nameProblem!.message}{nameProblem!.existing ? <> <Link to={`/plan/${nameProblem!.existing.id}`}>Open that plan</Link></> : null}
+                    </span>
+                  ) : null}
                 </Field>
               </div>
               <details className="fold card flat" style={{ padding: 0 }}>
@@ -246,42 +291,57 @@ export function Planner({ editId }: { editId?: string }) {
                 </Field>
               </div>
               <label className="row"><input type="checkbox" className="check" checked={draft.site.floodProne} onChange={(e) => setSite('floodProne', e.target.checked)} /> The area floods or stays waterlogged in heavy rain</label>
-              {draft.sector === 'fish' ? <label className="row"><input type="checkbox" className="check" checked={draft.site.brackishWater} onChange={(e) => setSite('brackishWater', e.target.checked)} /> Water is brackish (coastal / salty)</label> : null}
-              {draft.sector === 'crops' ? <label className="row"><input type="checkbox" className="check" checked={draft.site.cool} onChange={(e) => setSite('cool', e.target.checked)} /> Cool highland climate (e.g. Benguet, Bukidnon, Tagaytay)</label> : null}
+              {draft.sectors.includes('fish') ? <label className="row"><input type="checkbox" className="check" checked={draft.site.brackishWater} onChange={(e) => setSite('brackishWater', e.target.checked)} /> Water is brackish (coastal / salty)</label> : null}
+              {draft.sectors.includes('crops') ? <label className="row"><input type="checkbox" className="check" checked={draft.site.cool} onChange={(e) => setSite('cool', e.target.checked)} /> Cool highland climate (e.g. Benguet, Bukidnon, Tagaytay)</label> : null}
             </div>
           </Card>
 
-          <div className="row between"><span className="muted small">{area > 0 ? `${area.toLocaleString()} sqm` : 'Enter your area to continue'}</span><Button disabled={!valid1} onClick={() => setStep(2)}>Next</Button></div>
+          <div className="row between">
+            <span className="muted small">
+              {area <= 0 ? 'Enter your area to continue'
+                : nameProblem?.existing ? 'Choose another project name to continue'
+                  : nameProblem ? 'Name your project to continue' : `${area.toLocaleString()} sqm`}
+            </span>
+            <Button disabled={!valid1} onClick={() => setStep(2)}>Next</Button>
+          </div>
         </div>
       ) : null}
 
       {step === 2 ? (
         <div className="stack">
           <Card title="What do you want to grow or raise?">
-            <Chips value={draft.sector} onChange={(v) => setDraft((d) => ({ ...d, sector: v, preferred: [] }))} items={[
-              { id: 'crops', label: 'Vegetables & crops', icon: <LuLeaf size={16} /> },
-              { id: 'fish', label: 'Fish', icon: <LuFish size={16} /> },
-              { id: 'livestock', label: 'Livestock', icon: <LuTractor size={16} /> },
-            ]} />
-            <hr className="sep" />
-            <Field label={`Which ${SECTOR_LABEL[draft.sector].toLowerCase()}? Pick one or more`} hint="Your plan uses exactly what you pick. Not sure? Leave it empty and we'll suggest some below.">
-              <div className="chips">
-                {sectorItems.map((i) => (
-                  <span key={i.id} className="row" style={{ gap: 2 }}>
-                    <button type="button" className={`chip ${draft.preferred.includes(i.id) ? 'on' : ''}`} aria-pressed={draft.preferred.includes(i.id)} onClick={() => togglePreferred(i.id)}>{i.emoji} {i.name}</button>
-                    {i.custom ? (
-                      <button type="button" className="icon-btn" aria-label={`Remove ${i.name} from my list`} title="Remove" onClick={() => {
-                        if (!removeCustomItem(i.id)) return toast(`${i.name} is used in a saved plan or record, so it can't be removed.`);
-                        set('preferred', draft.preferred.filter((x) => x !== i.id));
-                      }}><LuX size={14} /></button>
-                    ) : null}
-                  </span>
-                ))}
-                <button type="button" className="chip" onClick={() => setAddOpen(true)}><LuPlus size={16} /> Add your own</button>
-              </div>
-            </Field>
+            <ToggleChips label="What do you want to grow or raise?" value={draft.sectors} onToggle={toggleSector} items={TYPE_CHOICES} />
+            {draft.sectors.length === 0 ? (
+              <p className="field-error" role="alert" style={{ marginTop: 8 }}>{NO_TYPE}</p>
+            ) : (
+              <p className="small muted" style={{ marginTop: 8 }}>
+                {mixed ? `Mixed farm: your land is split evenly, about ${landEach.toLocaleString()} sqm for each type, and one budget covers them all.` : 'Tap more than one to mix them, for example vegetables with fruits or fish.'}
+              </p>
+            )}
+            {draft.sectors.map((sec) => (
+              <Fragment key={sec}>
+                <hr className="sep" />
+                <Field label={`${PICK_LABEL[sec]} Pick one or more`}>
+                  <div className="chips" role="group" aria-label={PICK_LABEL[sec]}>
+                    {itemsFor(sec).map((i) => (
+                      <span key={i.id} className="row" style={{ gap: 2 }}>
+                        {pickChip(i)}
+                        {i.custom ? (
+                          <button type="button" className="icon-btn" aria-label={`Remove ${i.name} from my list`} title="Remove" onClick={() => {
+                            if (!removeCustomItem(i.id)) return toast(`${i.name} is used in a saved plan or record, so it can't be removed.`);
+                            set('preferred', draft.preferred.filter((x) => x !== i.id));
+                          }}><LuX size={14} /></button>
+                        ) : null}
+                      </span>
+                    ))}
+                    <button type="button" className="chip" onClick={() => setAddFor(sec)}><LuPlus size={16} /> Add your own</button>
+                  </div>
+                </Field>
+              </Fragment>
+            ))}
+            {draft.sectors.length ? <p className="hint" style={{ marginTop: 8 }}>Your plan uses exactly what you pick. Not sure? Leave a type empty and we'll suggest some below.</p> : null}
           </Card>
-          <CustomItemSheet open={addOpen} onClose={() => setAddOpen(false)} sector={draft.sector} onAdded={(item) => set('preferred', [...draft.preferred, item.id])} />
+          <CustomItemSheet open={addFor !== null} onClose={() => setAddFor(null)} sector={addFor ?? 'crops'} onAdded={(item) => set('preferred', [...draft.preferred, item.id])} />
           <Card title="Budget and goals">
             <div className="form-grid">
               <Field label="Starting capital (PHP)" htmlFor="cap" hint="Include only money you can spend now. We'll scope the first phase to fit it.">
@@ -297,26 +357,29 @@ export function Planner({ editId }: { editId?: string }) {
               </Field>
             </div>
           </Card>
-          <ForecastCard result={preview} goal={draft.goal} capital={draft.capital > 0 ? draft.capital : undefined} picking={{
-            sector: draft.sector,
+          {draft.sectors.length ? <ForecastCard result={preview} goal={draft.goal} capital={draft.capital > 0 ? draft.capital : undefined} picking={{
+            sectors: draft.sectors,
             picked: draft.preferred,
             onAdd: (id) => { if (!draft.preferred.includes(id)) set('preferred', [...draft.preferred, id]); },
             onRemove: (id) => set('preferred', draft.preferred.filter((x) => x !== id)),
             onOpenPicker: () => setPickerOpen(true),
-          }} />
-          <Sheet open={pickerOpen} onClose={() => setPickerOpen(false)} title={`Add ${SECTOR_LABEL[draft.sector].toLowerCase()}`}>
+          }} /> : null}
+          <Sheet open={pickerOpen} onClose={() => setPickerOpen(false)} title={mixed ? 'Add items' : `Add ${SECTOR_LABEL[draft.sectors[0] ?? 'crops'].toLowerCase()}`}>
             <div className="stack">
               <p className="small muted">Tap to add or remove. Each one gets its own harvest and price estimate.</p>
-              <div className="chips">
-                {sectorItems.map((i) => (
-                  <button key={i.id} type="button" className={`chip ${draft.preferred.includes(i.id) ? 'on' : ''}`} aria-pressed={draft.preferred.includes(i.id)} onClick={() => togglePreferred(i.id)}>{i.emoji} {i.name}</button>
-                ))}
-                <button type="button" className="chip" onClick={() => { setPickerOpen(false); setAddOpen(true); }}><LuPlus size={16} /> Add your own</button>
-              </div>
+              {draft.sectors.map((sec) => (
+                <div key={sec} className="stack sm">
+                  {mixed ? <h3 className="small bold">{SECTOR_LABEL[sec]}</h3> : null}
+                  <div className="chips">
+                    {itemsFor(sec).map(pickChip)}
+                    <button type="button" className="chip" onClick={() => { setPickerOpen(false); setAddFor(sec); }}><LuPlus size={16} /> Add your own</button>
+                  </div>
+                </div>
+              ))}
               <Button block onClick={() => setPickerOpen(false)}>Done{draft.preferred.length ? ` (${draft.preferred.length} picked)` : ''}</Button>
             </div>
           </Sheet>
-          <div className="row between"><Button variant="ghost" onClick={() => setStep(1)}>Back</Button><Button disabled={!valid2} onClick={() => setStep(3)}>Next</Button></div>
+          <div className="row between"><Button variant="ghost" onClick={() => setStep(1)}>Back</Button>{draft.sectors.length ? null : <span className="small muted grow" style={{ textAlign: 'right' }}>Choose what to grow or raise</span>}<Button disabled={!valid2} onClick={() => setStep(3)}>Next</Button></div>
         </div>
       ) : null}
 
@@ -324,10 +387,19 @@ export function Planner({ editId }: { editId?: string }) {
         <div className="stack">
           <Card title="Review">
             <div className="kv">
+              <span className="muted">Project</span><span className="bold">{cleanPlanName(draft.name)}</span>
               <span className="muted">Location</span><span className="bold">{draft.place.name}, {draft.place.province}</span>
               <span className="muted">Area</span><span className="bold">{area.toLocaleString()} sqm</span>
-              <span className="muted">Type</span><span className="bold">{SECTOR_LABEL[draft.sector]}</span>
-              <span className="muted">Picked</span><span className="bold">{draft.preferred.length ? draft.preferred.map((id) => catalogById(id)?.name ?? id).join(', ') : "None: we'll suggest"}</span>
+              <span className="muted">{mixed ? 'Types' : 'Type'}</span><span className="bold">{draft.sectors.map((sec) => SECTOR_LABEL[sec]).join(' + ')}</span>
+              {mixed ? <><span className="muted">Land split</span><span className="bold">About {landEach.toLocaleString()} sqm for each type</span></> : null}
+              <span className="muted">Picked</span>
+              <span className="bold">
+                {draft.sectors.map((sec) => {
+                  const names = draft.preferred.filter((id) => catalogById(id)?.sector === sec).map((id) => catalogById(id)!.name);
+                  const text = names.length ? names.join(', ') : "None: we'll suggest";
+                  return <span key={sec} style={{ display: 'block' }}>{mixed ? `${SECTOR_LABEL[sec]}: ${text}` : text}</span>;
+                })}
+              </span>
               <span className="muted">Capital</span><span className="bold">{peso(draft.capital)}</span>
               <span className="muted">Experience</span><span className="bold" style={{ textTransform: 'capitalize' }}>{draft.experience}</span>
               <span className="muted">Site</span><span className="bold">{draft.site.slope} slope · {draft.site.sunlight.replace('full', 'full sun')} · {draft.site.waterSource === 'none' ? 'no water yet' : `${draft.site.waterSource} water`}{draft.site.floodProne ? ' · floods' : ''}</span>

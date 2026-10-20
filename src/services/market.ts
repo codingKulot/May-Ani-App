@@ -20,6 +20,9 @@ const REFERENCE: Record<string, [retail: number, farmGate: number]> = {
   patola: [70, 40], talong: [85, 45], ampalaya: [110, 60], kamatis: [80, 40], sili: [220, 120],
   corn: [28, 14], rice: [50, 20], tilapia: [160, 110], hito: [170, 110], bangus: [190, 150],
   ulang: [700, 450], native_chicken: [320, 220], broiler: [190, 95], itik: [170, 130], goat: [450, 180],
+  // fruits (added 20 October 2026): planning estimates too, not taken from a published list
+  mango: [150, 55], banana: [80, 35], papaya: [50, 18], calamansi: [100, 40], pineapple: [50, 18],
+  dragon_fruit: [160, 80], lanzones: [100, 50], rambutan: [90, 40], guava: [80, 40], watermelon: [45, 20],
 };
 
 export function referenceSnapshot(): MarketSnapshot {

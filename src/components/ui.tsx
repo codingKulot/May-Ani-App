@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { num, parseNumber } from '@/lib/format';
-import { LuCircleAlert, LuInfo, LuShieldAlert, LuTriangleAlert, LuX } from 'react-icons/lu';
+import { LuCheck, LuCircleAlert, LuInfo, LuShieldAlert, LuTriangleAlert, LuX } from 'react-icons/lu';
 import type { AppIcon } from '@/types';
 
 export function PageHeader(p: { title: string; sub?: ReactNode; actions?: ReactNode }) {
@@ -109,6 +109,23 @@ export function Chips<T extends string>(p: { items: { id: T; label: string; icon
           {i.label}
         </button>
       ))}
+    </div>
+  );
+}
+
+/** Like Chips, but any number can be on (each one is a toggle button). */
+export function ToggleChips<T extends string>(p: { items: { id: T; label: string; icon?: ReactNode }[]; value: readonly T[]; onToggle: (id: T) => void; label: string }) {
+  return (
+    <div className="chips" role="group" aria-label={p.label}>
+      {p.items.map((i) => {
+        const on = p.value.includes(i.id);
+        return (
+          <button key={i.id} type="button" aria-pressed={on} className={`chip ${on ? 'on' : ''}`} onClick={() => p.onToggle(i.id)}>
+            {on ? <LuCheck size={16} /> : i.icon}
+            {i.label}
+          </button>
+        );
+      })}
     </div>
   );
 }

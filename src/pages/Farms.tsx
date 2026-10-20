@@ -1,14 +1,18 @@
-import { useState } from 'react';
-import { LuPlus, LuSparkles, LuSprout, LuTrash2 } from 'react-icons/lu';
+import { useRef, useState } from 'react';
+import type { ReactNode } from 'react';
+import { LuApple, LuFish, LuLeaf, LuPlus, LuSparkles, LuSprout, LuTractor, LuTrash2 } from 'react-icons/lu';
 import { Link, navigate } from '@/core/router';
 import { useAppState } from '@/core/store';
 import { addExistingFarm, removeFarm, setActiveFarm } from '@/core/actions';
 import { DEFAULT_PLACE, placeLabel } from '@/data/places';
-import { SECTOR_LABEL, catalogById, itemsFor } from '@/data/catalog';
+import { SECTOR_LABEL, catalogById, itemsFor, planSectors, sectorsLabel } from '@/data/catalog';
 import { isoDate, peso, sum } from '@/lib/format';
-import { TENURE_LABEL, WATER_LABEL, areaFieldLabel, checkFarmForm, toSqm, type FarmFormErrors, type FarmFormInput, type FarmLine } from '@/services/farmForm';
+import {
+  NO_FARM_TYPE, TENURE_LABEL, WATER_LABEL, areaFieldLabel, checkFarmForm, itemsTitle, nameHint, startedLabel, toSqm, toggleFarmSector,
+  type FarmFormErrors, type FarmFormInput, type FarmLine,
+} from '@/services/farmForm';
 import type { LandTenure, Sector, WaterSource } from '@/types';
-import { Badge, Button, Card, Chips, Empty, Field, LinkButton, NumberInput, PageHeader, Sheet, Stat, askConfirm, toast } from '@/components/ui';
+import { Badge, Button, Card, Chips, Empty, Field, LinkButton, NumberInput, PageHeader, Sheet, Stat, ToggleChips, askConfirm, toast } from '@/components/ui';
 import { PlaceSelect } from '@/components/widgets';
 
 const areaLabel = (sqm: number) => (sqm >= 10000 ? `${(sqm / 10000).toFixed(2)} ha` : `${sqm} sqm`);
@@ -34,7 +38,7 @@ export function Farms() {
               <span className="thumb"><LuSprout size={24} color="#0f6b3a" /></span>
               <div className="grow">
                 <div className="bold">{f.name}</div>
-                <div className="small muted">{SECTOR_LABEL[f.sector]} · {areaLabel(f.areaSqm)}</div>
+                <div className="small muted">{sectorsLabel(planSectors(f))} · {areaLabel(f.areaSqm)}</div>
                 <div className="tiny faint">{placeLabel(f.location)}</div>
               </div>
               {s.activeFarmId === f.id ? <Badge>Active</Badge> : null}
@@ -63,18 +67,25 @@ export function Farms() {
   );
 }
 
-const NAME_HINT: Record<Sector, string> = { crops: "e.g. Lola's vegetable plot", fish: 'e.g. Tilapia ponds sa likod', livestock: 'e.g. Backyard piggery' };
-const ITEMS_TITLE: Record<Sector, string> = { crops: 'What are you growing now?', fish: 'What are you raising now?', livestock: 'What animals do you have now?' };
-const STARTED_LABEL: Record<Sector, string> = { crops: 'Planted on', fish: 'Stocked on', livestock: 'Started on' };
+/** Same words and icons as the planner's type buttons. */
+const TYPE_CHOICES: { id: Sector; label: string; icon: ReactNode }[] = [
+  { id: 'crops', label: 'Vegetables & crops', icon: <LuLeaf size={16} /> },
+  { id: 'fruits', label: 'Fruits', icon: <LuApple size={16} /> },
+  { id: 'fish', label: 'Fish', icon: <LuFish size={16} /> },
+  { id: 'livestock', label: 'Livestock', icon: <LuTractor size={16} /> },
+];
 
 function AddFarm({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { profile } = useAppState();
-  const blank = (): FarmFormInput => ({ name: '', sector: 'crops', area: 0, unit: 'sqm', location: profile?.location ?? DEFAULT_PLACE, barangay: '', notes: '', lines: [] });
+  const blank = (): FarmFormInput => ({ name: '', sectors: ['crops'], area: 0, unit: 'sqm', location: profile?.location ?? DEFAULT_PLACE, barangay: '', notes: '', lines: [] });
   const [f, setF] = useState<FarmFormInput>(blank);
   const [tried, setTried] = useState(false);
+  const rowSeq = useRef(0);
   const set = (patch: Partial<FarmFormInput>) => setF((x) => ({ ...x, ...patch }));
   const setLine = (i: number, patch: Partial<FarmLine>) => set({ lines: f.lines.map((l, j) => (j === i ? { ...l, ...patch } : l)) });
-  const items = itemsFor(f.sector);
+  const mixed = f.sectors.length > 1;
+  const items = f.sectors.flatMap(itemsFor);
+  const options = (sec: Sector) => itemsFor(sec).map((c) => <option key={c.id} value={c.id}>{c.emoji} {c.name}</option>);
   const errors = checkFarmForm(f);
   const err = (k: keyof FarmFormErrors) => (tried && errors[k] ? <span className="field-error" role="alert">{errors[k]}</span> : undefined);
   const close = () => { onClose(); setF(blank()); setTried(false); };
@@ -95,9 +106,12 @@ function AddFarm({ open, onClose }: { open: boolean; onClose: () => void }) {
 
         <div className="form-section">
           <h3>Your farm</h3>
-          <Field label="Farm name" htmlFor="fn" hint={err('name')}><input id="fn" className="input" value={f.name} onChange={(e) => set({ name: e.target.value })} placeholder={NAME_HINT[f.sector]} /></Field>
-          <Field label="What kind of farm?"><Chips value={f.sector} onChange={(sector) => set({ sector, lines: [] })} items={[{ id: 'crops', label: '🌱 Crops' }, { id: 'fish', label: '🐟 Fish' }, { id: 'livestock', label: '🐖 Livestock' }]} /></Field>
-          <Field label={areaFieldLabel(f.sector)} htmlFor="fa" hint={err('area') ?? (f.unit === 'ha' && f.area > 0 ? `= ${toSqm(f.area, 'ha').toLocaleString()} sqm` : '1 hectare = 10,000 sqm')}>
+          <Field label="Farm name" htmlFor="fn" hint={err('name')}><input id="fn" className="input" value={f.name} onChange={(e) => set({ name: e.target.value })} placeholder={nameHint(f.sectors)} /></Field>
+          {/* The "choose at least one" message shows at once, like in the planner, not only after "Add farm". */}
+          <Field label="What kind of farm?" hint={f.sectors.length === 0 ? <span className="field-error" role="alert">{NO_FARM_TYPE}</span> : mixed ? 'Mixed farm: add what is on each part below.' : 'Tap more than one for a mixed farm, for example vegetables with fish.'}>
+            <ToggleChips label="What kind of farm?" value={f.sectors} onToggle={(id) => setF((x) => toggleFarmSector(x, id))} items={TYPE_CHOICES} />
+          </Field>
+          <Field label={areaFieldLabel(f.sectors)} htmlFor="fa" hint={err('area') ?? (f.unit === 'ha' && f.area > 0 ? `= ${toSqm(f.area, 'ha').toLocaleString()} sqm` : '1 hectare = 10,000 sqm')}>
             <div className="input-group">
               <NumberInput id="fa" value={f.area} min={0} onChange={(area) => set({ area })} placeholder="0" />
               <Chips seg value={f.unit} onChange={(unit) => set({ unit })} items={[{ id: 'sqm', label: 'sqm' }, { id: 'ha', label: 'hectares' }]} />
@@ -110,18 +124,22 @@ function AddFarm({ open, onClose }: { open: boolean; onClose: () => void }) {
         </div>
 
         <div className="form-section">
-          <h3>{ITEMS_TITLE[f.sector]} <span className="faint small">(optional)</span></h3>
+          <h3>{itemsTitle(f.sectors)} <span className="faint small">(optional)</span></h3>
           <p className="small muted" style={{ marginTop: -6 }}>Each one becomes a production record, so you can log harvests and sales right away.</p>
           {f.lines.map((l, i) => (
-            <div key={i} className="line-item">
-              <Field label="Item" htmlFor={`li${i}`}><select id={`li${i}`} className="input" value={l.itemId} onChange={(e) => setLine(i, { itemId: e.target.value })}>{items.map((c) => <option key={c.id} value={c.id}>{c.emoji} {c.name}</option>)}</select></Field>
+            <div key={l.row ?? i} className="line-item">
+              <Field label="Item" htmlFor={`li${i}`}>
+                <select id={`li${i}`} className="input" value={l.itemId} onChange={(e) => setLine(i, { itemId: e.target.value })}>
+                  {mixed ? f.sectors.map((sec) => <optgroup key={sec} label={SECTOR_LABEL[sec]}>{options(sec)}</optgroup>) : options(f.sectors[0])}
+                </select>
+              </Field>
               <Field label="Area (sqm)" htmlFor={`la${i}`}><NumberInput id={`la${i}`} value={l.areaSqm} min={0} onChange={(areaSqm) => setLine(i, { areaSqm })} placeholder="0" /></Field>
-              <div className="date"><Field label={STARTED_LABEL[f.sector]} htmlFor={`ld${i}`}><input id={`ld${i}`} type="date" className="input" max={isoDate()} value={l.startedOn} onChange={(e) => setLine(i, { startedOn: e.target.value })} /></Field></div>
+              <div className="date"><Field label={startedLabel(l.itemId, f.sectors[0] ?? 'crops')} htmlFor={`ld${i}`}><input id={`ld${i}`} type="date" className="input" max={isoDate()} value={l.startedOn} onChange={(e) => setLine(i, { startedOn: e.target.value })} /></Field></div>
               <button type="button" className="icon-btn del" aria-label="Remove item" onClick={() => set({ lines: f.lines.filter((_, j) => j !== i) })}><LuTrash2 size={16} /></button>
             </div>
           ))}
           {err('lines')}
-          {items.length ? <div><Button variant="secondary" size="sm" onClick={() => set({ lines: [...f.lines, { itemId: items[0].id, areaSqm: 0, startedOn: isoDate() }] })}><LuPlus size={14} /> Add {f.lines.length ? 'another' : 'an item'}</Button></div> : null}
+          {items.length ? <div><Button variant="secondary" size="sm" onClick={() => set({ lines: [...f.lines, { row: ++rowSeq.current, itemId: items[0].id, areaSqm: 0, startedOn: isoDate() }] })}><LuPlus size={14} /> Add {f.lines.length ? 'another' : 'an item'}</Button></div> : null}
         </div>
 
         <div className="form-section">
@@ -156,7 +174,7 @@ export function FarmDetail({ id }: { id: string }) {
     <div className="page narrow">
       <PageHeader
         title={farm.name}
-        sub={`${SECTOR_LABEL[farm.sector]} · ${areaLabel(farm.areaSqm)} · ${farm.barangay ? `${farm.barangay}, ` : ''}${placeLabel(farm.location)}`}
+        sub={`${sectorsLabel(planSectors(farm))} · ${areaLabel(farm.areaSqm)} · ${farm.barangay ? `${farm.barangay}, ` : ''}${placeLabel(farm.location)}`}
         actions={<>
           {s.activeFarmId !== id ? <Button size="sm" variant="secondary" onClick={() => { setActiveFarm(id); toast('Set as active farm'); }}>Make active</Button> : <Badge>Active</Badge>}
           <Button size="sm" variant="danger" title="Delete farm" onClick={async () => {

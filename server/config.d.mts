@@ -11,6 +11,8 @@ export interface Config {
   allowedOrigin: string;
   appUrl: string;
   shutdownMs: number;
+  /** MONGODB_URI holds a password: never print `uri`. */
+  mongo: { uri: string; db: string; timeoutMs: number };
   [more: string]: unknown;
 }
 export function loadConfig(env: Record<string, string | undefined>): { config: Config; problems: string[] };

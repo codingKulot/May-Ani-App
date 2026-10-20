@@ -13,9 +13,10 @@ Owner: Ronilo (not a professional developer; explain choices plainly, he is lear
 Bun, React 19, TypeScript strict, own CSS (`src/styles.css`, no Tailwind), custom hash router (`src/core/router.tsx`), custom store (`src/core/store.ts`, `useSyncExternalStore`, localStorage key `may-ani.state.v1`). No `@types/react`: minimal shims are in `src/types/shims.d.ts`.
 - `bun run dev` : app on http://localhost:3000 (finds the server on 8787 automatically)
 - `bun run server` : API + chat server on 8787. `bun run start` builds, then serves everything on http://localhost:8787
-- `bun run typecheck`, `bun test` (346 tests on 19 October 2026, about 50 to 80 s; up to 2.5 minutes when the MongoDB end-to-end tests start cold), `bun run build` (output `dist/`; production build: `define` sets `process.env.NODE_ENV` so React's production build and the offline service worker are in it, about 560 KB JS; also writes `.br`/`.gz` copies: 586 KB of app files go out as 158 KB)
+- `bun run typecheck`, `bun test` (497 tests on 20 October 2026, about 1 to 3 minutes with the MongoDB end-to-end tests), `bun run build` (output `dist/`; production build: `define` sets `process.env.NODE_ENV` so React's production build and the offline service worker are in it, about 560 KB JS; also writes `.br`/`.gz` copies: 613 KB of app files go out as 166 KB on 20 October 2026)
+- `bun scripts/backup.ts [--all]` : copy of the MongoDB in `.env` into `backups/` (keeps 14); `bun scripts/restore.ts <folder|latest> <database> [--force]` (known open item 15). Never run them against the owner's Atlas in a check: set `MONGODB_URI` to a throwaway database.
 - Kill processes by port or PID, never `pkill -f` with a pattern that matches its own shell.
-- Version control: git repository since 18 October 2026 (branch `main`, first commit "Baseline"). No GitHub copy yet (`gh` is not installed). `.gitignore` keeps `.env`, `server/data.json*`, `node_modules`, `dist` out. Commit only when the owner asks.
+- Version control: git repository since 18 October 2026 (branch `main`, first commit "Baseline"). No GitHub copy yet (`gh` is not installed). `.gitignore` keeps `.env`, `server/data.json*`, `node_modules`, `dist`, `backups/` out. Commit only when the owner asks.
 
 ## Login only (owner's decision, 18 October 2026)
 May-Ani is for logged-in users only: no guest mode, so nobody anonymous can message or scam farmers. App: `App.tsx` shows Welcome
@@ -35,8 +36,15 @@ Removed: guest mode, the Account page, guest AI limits and the phone id (`X-Devi
 chat contacts, the separate chat token (`may-ani.chatToken` is deleted on connect).
 
 ## Layout
+- Project name (owner's rule, 20 October 2026): the planner's "Project name" is required and unique per account
+  (`planNameProblem` in `services/planner/name.ts`: trimmed, at most 60 characters, compared without regard to capitals and extra
+  spaces against every other plan's shown title and typed name; older unnamed plans match by their made-up title). Shown under the
+  box (empty after leaving it, a used name at once, with "Open that plan"); Next stays off with a hint; checked again on Generate.
+  Edit now changes the same plan (`replacePlan` in `core/actions.ts`: same id, farm link, build choices, photos) instead of adding a
+  copy. Limits: only plans this phone knows are checked (another phone's plan counts once it has synced); two phones offline can
+  still both use one name, and the server does not refuse it (sync stores records as they come). Tests: `tests/plan-name.test.ts`.
 - `src/pages/*` one file per screen: Dashboard, Planner (create plan), PlanDetail (tabs incl. Layout), Farms, Health, Weather, Market, Permits, Manage, Community (chat), Learn, Settings, Welcome (splash, sign up, log in; the only screen without a login), ResetPassword (`/reset?token=...`, opened from the reset email; App.tsx renders it full-screen with or without a profile, it strips the token from the address bar).
-- `src/data/*` catalog, diseases, faults, learn, permits, places, `materials.ts` (prices), `recyclables.ts`, `verses.ts` (Dashboard "Verse of the day", KJV, public domain).
+- `src/data/*` catalog (vegetables & crops, fruits, fish, livestock), diseases, faults, learn, permits, places, `materials.ts` (prices), `recyclables.ts`, `verses.ts` (Dashboard "Verse of the day", KJV, public domain).
 - `src/services/*` planner, weather, forecast, hazards, market, geocode, chat, health, `ai.ts` (client for the server's AI; exports `call` and `ApiError`), `auth.ts` (accounts client; token in its own localStorage key `may-ani.session.v1`, never in app state or backups), `sync/` (farm data that follows the account, see "Account data sync" below), `build/` (see below). Sign-up/log-in forms and the "Forgot your password?" form (`ForgotForm`, shown inside `LogInForm`): `src/components/AuthForms.tsx`.
 - `src/core/*` store, actions, router, hooks. `src/lib/*` format (`parseNumber` reads "1,500" / "₱1,500.50"), geo, image, `photoStore.ts` (IndexedDB for photos and AI pictures), `download.ts` (`saveFile`), `csv.ts` (BOM, formula-safe cells).
 - Chat (18 October 2026, `services/chat.ts`, `pages/Community.tsx`, `/api/chat/*` in `server/chat.mjs`, data in MongoDB since
@@ -119,6 +127,58 @@ answered 502, and the page silently fell back to the offline matcher, which need
   `wrongKind` (fish photo under "Plant" -> "Switch to Fish"; a saved log entry is filed under what the photo shows). `aiProblem`
   explains failures. Photos go up at 1568 px long side, whole; the preview uses `object-fit: contain` and a full-width scan line.
 
+## Planner types and mixes (built 20 October 2026)
+Owner's request: a **Fruits** button next to Vegetables & crops, Fish and Livestock, and any **combination** of the four.
+- `Sector` = `'crops' | 'fruits' | 'fish' | 'livestock'`; `SECTORS` (order), `planSectors(p)` (the ONLY way to read a plan's or farm's
+  types: `sectors` if present, else the old single `sector`, deduped, in SECTORS order, never empty), `sectorsLabel`, `waitLabel`
+  ("about 3½ years"), `plantsLabel` ("about 2 trees") in `src/data/catalog.ts`. `PlanInput.sectors` (new) + `sector` (= first type, still
+  written so older app copies can read new plans); `Farm.sectors` only for a farm with more than one type (a mixed plan saved as a
+  farm, or the "I already have a farm" form). Old plans and single-type farms have no `sectors`.
+- Fruits in the catalog: mango, banana, papaya, calamansi, pineapple, dragon_fruit, lanzones, rambutan, guava, watermelon; all numbers
+  are **estimates** (not sourced). Trees: `daysToHarvest` = planting to first real harvest, `cycleDays` 365, yield per sqm per year at
+  bearing age, `perPlantSqm` (spacing), `shadeTolerant` (lanzones), `areaKind`/rect kind `'orchard'`. Market reference prices for them
+  in `services/market.ts`. Custom fruit items: days up to 3650; a fruit over 365 days is estimated from the built-in fruit TREES
+  (spacing 36 sqm, costs, yield), gets `cycleDays` 365 and is counted in "trees"; a quicker one from the other fruits. Tree counts:
+  `plantSpots(item, rect)` (rows and columns rounded to the nearest whole tree) is used by the drawing, the Overview text and the
+  schedule, so they always agree (the schedule text is stored when a plan is made). Five fruit problems in
+  `data/diseases.ts` (fruit fly, anthracnose, bunchy top, Fusarium wilt, papaya ringspot); Health "Plant" lists fruits too.
+- Engine (`services/planner/index.ts`, `layout.ts`, `infra.ts`): the land is split evenly into one strip per type (`planPlot`, zones,
+  `layout.zones` for the drawing); each type ranks its own items (its picks, else suggestions); one shrink factor for all types until
+  the whole cost fits the capital; tank/pump, canal, wiring and permits are shared and counted once; `result.split` (mixed only) =
+  per-type cost + `shared`, adding up exactly to `cost.initial`. A type where nothing suits its share is dropped with a warning and
+  the rest is re-planned. Payback adds the first-harvest wait weighted by each item's income (was a plain average; single-type plans
+  moved by at most 0.3 months). The final drawing now uses the same numbers as the measured one (fixes priced vs drawn area drift).
+  A single-type plan is one strip: checked against a snapshot of 384 plans made before the change, identical except payback and,
+  for some, the drawn rectangles (costs unchanged).
+- UI: Planner step 2 `ToggleChips` (multi-select, `components/ui.tsx`), one picker + "Add your own" per chosen type, "Choose at least
+  one" message and Next disabled with none, turning a type off drops its picks, Review lists every type and its picks. ForecastCard:
+  `BudgetSplit` (money rounded to ₱100, whole percentages that add up to 100 via `wholePercents` in `lib/format.ts`), "Suggested"
+  rows (with +) for a type with no picks. PlanDetail: type badges, items grouped by type, tree
+  counts, waits in months/years, schedule shows "Year N" after week 52. PlanLayout: orchard blocks with one dot per tree, dashed
+  strip per type, legend grouped by type. Build ideas for a mixed plan: `services/build/garden.ts` (`gardenPart`) re-bases the
+  vegetable beds onto their own plot (that part up to 600 sqm). Sync/backup guards accept `fruits` and a valid `sectors` list.
+- "I already have a farm" form (`pages/Farms.tsx` AddFarm, rules in `services/farmForm.ts`, 20 October 2026): "What kind of farm?" is
+  `ToggleChips` with the planner's words and icons. `FarmFormInput.sectors` (SECTORS order); `buildFarm` saves `sector` = first type
+  and `sectors` only when more than one (same shape as `savePlanAsFarm`). `toggleFarmSector` keeps the order and removes the lines of
+  a type turned off; the item list has every chosen type (`optgroup` per type when mixed); each line's date label comes from its own
+  item (`startedLabel`: Planted / Stocked / Started on). No type: `NO_FARM_TYPE` (the planner's words) shows at once and
+  `checkFarmForm` gives `sectors`, so "Add farm" saves nothing. Mixed wording: `areaFieldLabel` "Whole farm area", `nameHint`,
+  `itemsTitle` ("growing and raising"). `FarmLine.row` is a form-only id (rows keep their boxes when a line above goes; never saved).
+- Verified 20 October 2026: `tests/planner.test.ts` (fruits, mixed plans, all 15 type combinations x 3 farm sizes, old plans, build
+  ideas), `custom-items`, `sync` (fruit/mixed/old records and backup restore), `services` (fruit problems), `format`; and a browser check
+  on the throwaway database ("server-test-db") at 375 px and 1280 px: type buttons wrap, picker per type, "Choose at least one",
+  turning a type off drops its picks, mixed and fruits-only plans generated and opened (all tabs), Save Plan -> mixed farm labels on
+  Farms and Dashboard, Edit restores the types, an old-style plan (no `sectors`) opens and edits as its one type, both synced to a
+  second "phone" (127.0.0.1), "Add your own" fruit, Market/Health/Permits/farm form, no console errors.
+- Farm form verified 20 October 2026: `tests/farm-form.test.ts` (16 tests: shape like a saved mixed plan, sync check passes, toggle
+  order and line removal, row ids never saved, wording, per-line date labels, area check across types) and a browser check on the
+  throwaway database at 375 px and 1280 px: crop line kept when Fish and Livestock were added, crop line (only) gone when crops were
+  turned off, other lines kept their numbers, "Choose at least one" with none and nothing saved, a Fruits + Fish + Livestock farm with
+  3 records saved and shown on Farms, the farm page and Dashboard, synced to a second "phone" (127.0.0.2, see Testing notes: use `*.localhost` instead), a Fish-only farm saved
+  without `sectors`.
+- Not done: phones still running an older copy of the app skip fruit plans/farms/items from the account (no crash) until they update.
+  Fruit numbers are estimates, not sourced.
+
 ## Layout tab: "3 ideas for your site"
 Flow: user adds a site photo (planner photo is reused) -> one button "Analyze my photo and make 3 pictures" -> Claude reads the photo (`/api/ai/survey`: ground, reusable items, notes; optional, failure never blocks) -> an image model draws 3 designs on the photo (`/api/ai/render`) -> user taps an idea to see materials with current PH prices, recycling options and measured build steps.
 - Deterministic engine, no AI for numbers: `src/services/build/designs.ts` (3 designs: raised beds, grow bags/containers, vertical; cut list with lumber optimisation, 8 ft stock, 3 mm kerf, board feet; media mix; BOM; steps; `priceDesign`), `prompt.ts` (builds the image prompt from the design's real numbers), `geometry.ts` (homography helpers, leftover from the removed overlay; `isValidQuad` still used by `ai.ts`).
@@ -145,7 +205,7 @@ Flow: user adds a site photo (planner photo is reused) -> one button "Analyze my
    (fan) and a fish under "Plant", and watch the server log for any 400 about the request.
 3. Prices are a snapshot (sources and date in `src/data/materials.ts`, `PRICES_AS_OF`). Refresh them before relying on them.
 4. Owner still needs to delete old duplicate folders in Documents (AniAqua, MyAni, MyAniApp, a loose May-Ani); not something to automate.
-5. Only crop plans up to 600 sqm get the build ideas; fish and livestock builds are not covered.
+5. Only crop plans up to 600 sqm (and the vegetable part of a mixed plan, up to 600 sqm) get the build ideas; fruit, fish and livestock builds are not covered.
 6. Accounts (built 18 October 2026) run on the owner's **MongoDB Atlas free (M0) cluster**, verified 18 October 2026: server connects, first real account saved in database `may_ani` (scrypt hash, SHA-256 session, TTL index). Atlas only lets in allowed IP addresses: a Philippine home IP can change, and then the server log says MongoDB is not reachable. Fix: Atlas > Network Access > add the current IP.
 7. Password reset by email (built 18 October 2026) is verified only against the fake mail server in tests and a browser check; **real Gmail sending is untested** until the owner adds `SMTP_USER` and `SMTP_PASSWORD`. First real run: check the startup line says `Email: logged in to smtp.gmail.com`, send one reset to the owner's own email, and look in Spam.
    Accounts gaps: no email verification at sign-up (anyone can sign up with an address they do not own; a reset email would then go to the real owner of that address). Chat identity follows the account since 18 October 2026, and chat data is in MongoDB since 19 October 2026.
@@ -166,8 +226,8 @@ Flow: user adds a site photo (planner photo is reused) -> one button "Analyze my
     security headers) done the same day. Still open from that list: hosting with HTTPS, privacy notice and account deletion
     (RA 10173), email verification, change password / log out everywhere, chat: no block/report (important for a marketplace,
     now that everyone is a named account), no read receipts (ticks), read state is per phone, no notifications while the app is fully closed (needs Web Push);
-    Filipino interface, editing records and undo, units beyond kg, offline weather, reminders, MongoDB backups, browser tests,
-    code splitting (on purpose, see docs/ARCHITECTURE.md decision 7). Chat in MongoDB and a CI file were done 19 October 2026.
+    Filipino interface, editing records and undo, units beyond kg, offline weather, reminders, browser tests,
+    code splitting (on purpose, see docs/ARCHITECTURE.md decision 7). Chat in MongoDB, a CI file and MongoDB backups (item 15) were done 19 October 2026.
 13. Chat and login-only (18 October 2026) are verified by tests (login needed for every chat and AI call, sender is always the logged-in
     account, old guests hidden, one-time stream tickets, unread rules) and a browser check on a throwaway MongoDB ("server-test-db"):
     pages redirect to Welcome without a login, sign-up, a live message from a second account (badge, tab title, notice), sides on both
@@ -186,6 +246,19 @@ Flow: user adds a site photo (planner photo is reused) -> one button "Analyze my
     blocks; weather, map tiles and the service worker work; an injected script and an outside image were blocked), but with AI
     switched off: the Health allowance line and the "used up" alert were not seen in a browser (covered by end-to-end tests).
     A plain `http` market feed URL is blocked on the built app (CSP `connect-src 'self' https:`).
+15. MongoDB backups (19 October 2026, README "Backing up your data"): `scripts/backup.ts` copies every collection except the
+    short-lived ones (`SHORT_LIVED`: sessions, password_resets, chat_tickets, limits; `--all` includes them) into
+    `backups/<YYYY-MM-DD-HHmm Philippine time>/<collection>.jsonl` (canonical Extended JSON, read with `promoteValues: false`, so
+    Int32/Double/Long/Decimal128/ObjectId/Date round-trip exactly) plus `manifest.json` (counts, indexes; written last). Written
+    into `<name>.partial`, renamed when complete. Keeps the newest `BACKUP_KEEP` (14); prunes only folders with a backup name AND a
+    May-Ani manifest inside `BACKUP_DIR` (default `backups/`, in .gitignore and .dockerignore: password hashes and personal data).
+    `scripts/restore.ts <folder|latest> <database> [--force]` refuses a database with any documents unless `--force` (then it drops
+    and refills only the backup's collections), checks counts, recreates indexes. Both read MONGODB_URI/MONGODB_DB through
+    `server/config.mjs` and never print the address (`hideSecret`). Verified: `tests/backup-db.test.ts` and a manual run on the
+    throwaway test DB (backup, restore into a new name, the real server on the restored copy: old password logs in, farm and chat
+    back). **Not verified:** a run against the owner's Atlas, and the Task Scheduler task (its commands were only checked to build
+    valid objects; nothing was registered). Not point-in-time (collection by collection). Backups stay on the owner's PC (no
+    off-site copy).
 
 ## Testing notes
 - Unit tests live in `tests/`. `tests/build-sync.test.ts` keeps the server's id lists and prompt limit in sync with the app. Keep it passing when changing either side.
@@ -196,6 +269,14 @@ Flow: user adds a site photo (planner photo is reused) -> one button "Analyze my
 - Browser check of log-in, sync and chat without the owner's Atlas: `bun scripts/test-db.ts` (throwaway MongoDB on port 27999, run in the background) and the "server-test-db" preview (`scripts/test-db.env`, port 8791; its old chat file `server/data.json.test`, if any, is imported once). A second copy for a two-server check: the "server-test-db-2" preview (`scripts/test-db-2.env`, port 8792, same database). Stop the database afterwards.
 - Browser check of the built app without real keys or database: `bun run build`, then the "server-safe" preview (`.claude/launch.json`, `bun --env-file=scripts/safe.env server/index.mjs`, port 8790; every key is a single space = off, so the server's own `.env` reader does not fill them in).
 - `tests/scale.test.ts`: two server processes on one throwaway MongoDB (a message sent through one arrives live on a stream opened on the other, a ticket works once on any copy, no double delivery, lockout and daily allowance shared and surviving a restart), the old chat file import (accounts only, idempotent, file renamed), JSON logs (no query strings), config problems, the in-process clean stop (`createApp` + `shutdown()`: a running request finishes, streams end, server gone), the 16 KB chat body limit, and app files (brotli/gzip by Accept-Encoding, immutable chunks, 304, 404 for missing chunks, 403 outside dist).
+- `tests/backup-db.test.ts` (database backups, throwaway MongoDB via `startMongo`; the scripts are also run as processes with
+  `MONGODB_URI`, `MONGODB_DB`, `BACKUP_DIR` (a temp folder) and `BACKUP_KEEP` always set by the test, because `bun test` loads the
+  owner's `.env`): backup then restore gives identical documents in canonical Extended JSON (number types included) and the same
+  indexes, short-lived collections left out unless `--all`, same-minute names, retention keeps N and never touches other folders,
+  stale `.partial` folders, refusal without `--force`, damaged files (line number, never the line), the address never printed.
+  Manual check (Bash): `bun scripts/test-db.ts`, data through the "server-test-db" preview, then
+  `MONGODB_URI=mongodb://127.0.0.1:27999/ MONGODB_DB=may_ani_browser_check bun scripts/backup.ts` (and `restore.ts latest <new name>`
+  with the same variables); delete the test folder in `backups/` afterwards.
 - `tests/backup.test.ts` (restore only takes checked farm data, never settings or profile), `tests/store.test.ts` (damaged saved data kept, lists repaired, "not saved" warning, saves grouped and written at once on hide), `tests/server.test.ts` (static file folder check, broken %-codes, a damaged old chat file moved aside and chat no longer written to a file, picture errors stay in the log), `tests/format.test.ts` (number parsing, empty dates, CSV safety).
 - `tests/health-ai.test.ts` covers the health photo check against a fake Anthropic API (Bun.serve on 127.0.0.1 via
   `ANTHROPIC_BASE_URL`): photo-only checks, the whole photo forwarded unchanged, the relevance check (fan -> no diagnosis, blurry,
@@ -206,6 +287,11 @@ Flow: user adds a site photo (planner photo is reused) -> one button "Analyze my
   running the app's own engine against the real server (edits both ways, offline conflicts, slow clock, edits during a sync, the
   first-login question both ways). It also checks that the lists and limits match between `server/sync.mjs` and `records.ts`.
 - Browser check without touching the owner's database: start the server with a throwaway MongoDB (`mongodb-memory-server`, set
-  `MONGODB_URI` in the environment, which wins over `.env`), then use `localhost:PORT`, `127.0.0.1:PORT` and `127.0.0.2:PORT` as
-  separate "phones" (each address has its own browser storage).
+  `MONGODB_URI` in the environment, which wins over `.env`), then use `localhost:PORT`, `127.0.0.1:PORT`, `phone2.localhost:PORT`,
+  `phone3.localhost:PORT` (any `<name>.localhost`) as separate "phones" (each address has its own browser storage). Do NOT use
+  `127.0.0.2`: the built-in browser pane of the Claude app never sends the service worker download there (checked 20 October 2026
+  with a server that logs every request: the page arrived, `sw.js` never did; on a port the pane did not start, even `localhost`
+  failed), so the console shows "An unknown error occurred when fetching the script" and that "phone" runs without the offline
+  helper. Not an app problem: headless Edge registers and activates May-Ani's `sw.js` on `127.0.0.2` normally. `*.localhost`
+  names on the preview's port work in the pane (offline helper active, log-in and sync checked on two of them, no console errors).
 - Published preview of the app also exists as a claude.ai artifact (built from `dist/`); it is a convenience, not the source of truth. The source of truth is this folder.

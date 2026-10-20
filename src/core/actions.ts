@@ -7,6 +7,7 @@ import { deletePhotos } from '@/lib/photoStore';
 import { saveFile } from '@/lib/download';
 import { buildFarm, type FarmFormInput } from '@/services/farmForm';
 import { DEFAULT_PLACE } from '@/data/places';
+import { planSectors } from '@/data/catalog';
 import { logOut } from '@/services/auth';
 import { forgetSync } from '@/services/sync';
 import { LIST_COLLECTIONS, PREF_IDS, cleanBackup, type PrefId } from '@/services/sync/records';
@@ -83,14 +84,28 @@ export function savePlanDraft(input: PlanInput, result: PlanResult): SavedPlan {
   return plan;
 }
 
+/**
+ * Edit: the same plan (same id, farm link, build choices and photos) with new answers and a new result, so editing never leaves
+ * a second plan with the same name. Null when the plan is gone (deleted on another phone meanwhile).
+ */
+export function replacePlan(id: string, input: PlanInput, result: PlanResult): SavedPlan | null {
+  const old = getState().plans.find((p) => p.id === id);
+  if (!old) return null;
+  const plan: SavedPlan = { ...old, input, result };
+  setState((s) => ({ ...s, plans: s.plans.map((p) => (p.id === id ? plan : p)) }));
+  return plan;
+}
+
 /** "Save Plan": turns a plan into a farm (once) and seeds production records + first tasks. */
 export function savePlanAsFarm(planId: string): Farm | null {
   const plan = getState().plans.find((p) => p.id === planId);
   if (!plan) return null;
   if (plan.farmId) return getState().farms.find((f) => f.id === plan.farmId) ?? null;
+  const sectors = planSectors(plan.input);
   const farm = addFarm({
     name: plan.result.title,
-    sector: plan.input.sector,
+    sector: sectors[0],
+    ...(sectors.length > 1 ? { sectors } : {}),
     areaSqm: plan.input.areaSqm,
     location: plan.input.location,
     planId: plan.id,

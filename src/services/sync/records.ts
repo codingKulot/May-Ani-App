@@ -1,4 +1,5 @@
 import type { AppState } from '@/types';
+import { SECTORS as APP_SECTORS } from '@/data/catalog';
 
 /**
  * Which parts of the app state follow the account, and how they travel: as separate records ("farms/<id>", "prefs/watchlist"...),
@@ -110,14 +111,17 @@ const isStr = (v: unknown): v is string => typeof v === 'string';
 const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
 const isBool = (v: unknown): v is boolean => typeof v === 'boolean';
 const isPlace = (v: unknown) => isObj(v) && isStr(v.name) && isNum(v.lat) && isNum(v.lon);
-const SECTORS = ['crops', 'fish', 'livestock'];
+// 'fruits' since 20 October 2026. Phones with an older copy of the app skip fruit records (they do not crash) until they update.
+const SECTORS: readonly string[] = APP_SECTORS;
+/** `sectors` (mixed plans and farms, since 20 October 2026) is optional; when present it is one or more known types. */
+const isSectorList = (v: unknown) => v === undefined || (Array.isArray(v) && v.length > 0 && v.length <= SECTORS.length && v.every((x) => SECTORS.includes(x)));
 const ITEM_NUMBERS = ['daysToHarvest', 'cycleDays', 'minAreaSqm', 'startupCostPerSqm', 'opCostPerSqmMonth', 'yieldKgPerSqm', 'farmGatePerKg', 'waterLPerSqmDay'];
 
 const GUARDS: Record<ListCollection, (d: Data) => boolean> = {
-  farms: (d) => isStr(d.name) && SECTORS.includes(d.sector) && isNum(d.areaSqm) && isPlace(d.location) && isStr(d.createdAt),
+  farms: (d) => isStr(d.name) && SECTORS.includes(d.sector) && isSectorList(d.sectors) && isNum(d.areaSqm) && isPlace(d.location) && isStr(d.createdAt),
   plans: (d) => {
     const r = d.result;
-    return isStr(d.createdAt) && isObj(d.input) && SECTORS.includes(d.input.sector) && isPlace(d.input.location) && isObj(d.input.site)
+    return isStr(d.createdAt) && isObj(d.input) && SECTORS.includes(d.input.sector) && isSectorList(d.input.sectors) && isPlace(d.input.location) && isObj(d.input.site)
       && isObj(r) && isStr(r.title) && Array.isArray(r.allocations) && isObj(r.cost) && isObj(r.layout) && Array.isArray(r.layout.rects)
       && isObj(r.water) && isObj(r.drainage) && isObj(r.electrical) && Array.isArray(r.schedule) && Array.isArray(r.warnings) && Array.isArray(r.assumptions);
   },

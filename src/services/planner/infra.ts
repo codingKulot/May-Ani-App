@@ -1,7 +1,11 @@
-import type { DrainagePlan, ElectricalPlan, PlanInput, WaterPlan } from '@/types';
+import { SECTOR_SHORT } from '@/data/catalog';
+import type { DrainagePlan, ElectricalPlan, PlanInput, Sector, WaterPlan } from '@/types';
 import type { AllocTarget } from './layout';
 
 const TANK_SIZES = [200, 500, 1000, 2000, 3000, 5000, 10000, 20000, 50000];
+
+/** One type's part of a plan: its items and the area they use. A single-type plan has one part. */
+export interface Part { sector: Sector; allocs: AllocTarget[]; usedSqm: number }
 
 const SOURCE_TEXT: Record<PlanInput['site']['waterSource'], string> = {
   none: 'No water source yet. Start with rainwater harvesting from a roof into a tank, and plan a shallow well (check NWRB / LGU rules before drilling).',
@@ -10,6 +14,9 @@ const SOURCE_TEXT: Record<PlanInput['site']['waterSource'], string> = {
   stream: 'Stream / canal / spring. Use gravity or a pump with an intake screen; confirm water rights with NWRB or your irrigators association.',
   rain: 'Rainwater harvesting. Every 1 mm of rain on 1 sqm of roof gives about 0.8 L - size your roof and tank for the dry spell.',
 };
+
+/** In a mixed plan each type's lines start with its name, so the reader knows which part they are for. */
+const tagged = (parts: Part[], p: Part, text: string) => (parts.length > 1 ? `${SECTOR_SHORT[p.sector]}: ${text}` : text);
 
 function pumpHpFor(demand: number, source: PlanInput['site']['waterSource']): number {
   if (source === 'municipal' && demand < 1000) return 0;
@@ -20,51 +27,67 @@ function pumpHpFor(demand: number, source: PlanInput['site']['waterSource']): nu
   return 3;
 }
 
-export function waterPlan(input: PlanInput, allocs: AllocTarget[], usedArea: number): WaterPlan {
-  const demand = Math.round(allocs.reduce((s, a) => s + a.areaSqm * a.item.waterLPerSqmDay, 0));
+const litres = (p: Part) => p.allocs.reduce((s, a) => s + a.areaSqm * a.item.waterLPerSqmDay, 0);
+
+export function waterPlan(input: PlanInput, parts: Part[], usedArea: number): WaterPlan {
+  const demand = Math.round(parts.reduce((s, p) => s + litres(p), 0));
   const direct = demand > 20000;
   let tank = 0;
   const tiny = demand < 60 && input.site.waterSource !== 'rain' && input.site.waterSource !== 'none';
   if (!direct && !tiny) {
-    // fish ponds are filled straight from the source, so only a small buffer/settling tank is sized
-    const days = input.sector === 'fish' ? 0.5 : 2;
-    const need = Math.max(200, demand * days);
+    // fish ponds are filled straight from the source, so only a small buffer/settling tank is sized for them
+    const days = (p: Part) => (p.sector === 'fish' ? 0.5 : 2);
+    const need = Math.max(200, parts.length === 1 ? demand * days(parts[0]) : parts.reduce((s, p) => s + litres(p) * days(p), 0));
     tank = TANK_SIZES.find((t) => t >= need) ?? TANK_SIZES[TANK_SIZES.length - 1];
   }
   const pumpHp = pumpHpFor(demand, input.site.waterSource);
   const steps: string[] = [];
-  let method = '';
+  const methods: string[] = [];
 
-  if (input.sector === 'crops') {
-    method = usedArea < 30 ? 'Hand watering in the morning, optionally a simple drip kit' : 'Drip irrigation lines on every bed, fed from the tank';
-    steps.push(
-      tiny
-        ? 'Water by hand with a watering can or buckets in the morning - no tank is needed at this size.'
-        : usedArea < 30
-        ? 'Place a 200 L drum or tank on a stand at the garden edge and water with a can or a gravity hose in the morning.'
-        : 'Install a tank on a stand (about 1 m high) for gravity feed, or a pump-fed header line.',
-      'Run 1-2 drip lines per bed and flush the ends monthly to prevent clogging.',
-      'Water in the early morning; mulch to cut water use by up to a third.',
-    );
-  } else if (input.sector === 'fish') {
-    method = 'Gravity inlet pipe with screen, standpipe (monk) outlet on the low side';
-    steps.push(
-      'Fit a screened inlet at the high side and a standpipe or sluice drain at the low side of each pond.',
-      'Fill ponds slowly and let the water settle for several days before stocking; a depth of 0.8-1.2 m is typical for small ponds.',
-      'Plan 10-20% weekly water exchange for intensive ponds, and a top-up line for evaporation and seepage.',
-    );
-  } else {
-    method = 'Raised drinkers/troughs fed by a gravity line from the tank';
-    steps.push(
-      'Install nipple drinkers or covered troughs so water stays clean and dry bedding stays dry.',
-      'Place the tank higher than the housing so water flows by gravity.',
-      'Clean drinkers daily; animals drink much more in hot weather.',
-    );
+  for (const p of parts) {
+    const used = parts.length === 1 ? usedArea : p.usedSqm;
+    let method: string;
+    let own: string[];
+    if (p.sector === 'crops') {
+      method = used < 30 ? 'Hand watering in the morning, optionally a simple drip kit' : 'Drip irrigation lines on every bed, fed from the tank';
+      own = [
+        tiny
+          ? 'Water by hand with a watering can or buckets in the morning - no tank is needed at this size.'
+          : used < 30
+          ? 'Place a 200 L drum or tank on a stand at the garden edge and water with a can or a gravity hose in the morning.'
+          : 'Install a tank on a stand (about 1 m high) for gravity feed, or a pump-fed header line.',
+        'Run 1-2 drip lines per bed and flush the ends monthly to prevent clogging.',
+        'Water in the early morning; mulch to cut water use by up to a third.',
+      ];
+    } else if (p.sector === 'fruits') {
+      method = 'Basin or drip watering at each tree or row, fed from the tank';
+      own = [
+        'Make a shallow basin around each tree (or a furrow along each row) and mulch it to keep the soil moist.',
+        'Water young plants 2-3 times a week in the dry season; bearing trees need water most at flowering and fruit growth.',
+        'Keep water away from the trunk and never let it stand: most fruit trees die quickly in waterlogged soil.',
+      ];
+    } else if (p.sector === 'fish') {
+      method = 'Gravity inlet pipe with screen, standpipe (monk) outlet on the low side';
+      own = [
+        'Fit a screened inlet at the high side and a standpipe or sluice drain at the low side of each pond.',
+        'Fill ponds slowly and let the water settle for several days before stocking; a depth of 0.8-1.2 m is typical for small ponds.',
+        'Plan 10-20% weekly water exchange for intensive ponds, and a top-up line for evaporation and seepage.',
+      ];
+    } else {
+      method = 'Raised drinkers/troughs fed by a gravity line from the tank';
+      own = [
+        'Install nipple drinkers or covered troughs so water stays clean and dry bedding stays dry.',
+        'Place the tank higher than the housing so water flows by gravity.',
+        'Clean drinkers daily; animals drink much more in hot weather.',
+      ];
+    }
+    methods.push(tagged(parts, p, method));
+    steps.push(...own.map((x) => tagged(parts, p, x)));
   }
   if (direct) {
     steps.push('Daily demand is too large for a storage tank: plan a direct canal or pump supply with a reliable source, ideally irrigated by a group or cooperative.');
   }
-  if (input.site.waterSource === 'none' && input.sector === 'fish') {
+  if (input.site.waterSource === 'none' && parts.some((p) => p.sector === 'fish')) {
     steps.push('Fish cannot be farmed without a dependable water supply - secure a source before building ponds.');
   }
 
@@ -74,12 +97,19 @@ export function waterPlan(input: PlanInput, allocs: AllocTarget[], usedArea: num
     tankDays: tank && demand ? Math.round((tank / demand) * 10) / 10 : 0,
     source: SOURCE_TEXT[input.site.waterSource],
     pumpHp,
-    method,
+    method: methods.join('; '),
     steps,
   };
 }
 
-export function drainagePlan(input: PlanInput, usedArea: number, widthM: number, lengthM: number): DrainagePlan {
+const OWN_DRAINAGE: Record<Sector, string> = {
+  crops: 'Make beds 20-30 cm high so roots stay out of standing water, and keep the paths between beds as mini drains.',
+  fruits: 'Plant on low mounds where water collects and keep the base of every tree free of standing water; dig a shallow drain between rows on flat land.',
+  fish: 'Keep pond dikes at least 0.5 m above the highest water level and compact them well to prevent seepage and breaks.',
+  livestock: 'Raise the floor of the housing above ground level and slope the yard away from it so manure and water drain outward, not inward.',
+};
+
+export function drainagePlan(input: PlanInput, sectors: Sector[], usedArea: number, widthM: number, lengthM: number): DrainagePlan {
   const slopePct = input.site.slope === 'steep' ? 0.5 : input.site.slope === 'flat' ? 1.5 : 1;
   const flood = input.site.floodProne;
   const canalLengthM = Math.round(widthM + (flood ? widthM + 2 * lengthM : 0));
@@ -89,13 +119,8 @@ export function drainagePlan(input: PlanInput, usedArea: number, widthM: number,
   const steps: string[] = [
     `Dig the main drainage canal along the low (south) edge, ${canalSize}, grading it ${slopePct}% toward the outlet so water never stands.`,
   ];
-  if (input.sector === 'crops') {
-    steps.push('Make beds 20-30 cm high so roots stay out of standing water, and keep the paths between beds as mini drains.');
-  } else if (input.sector === 'fish') {
-    steps.push('Keep pond dikes at least 0.5 m above the highest water level and compact them well to prevent seepage and breaks.');
-  } else {
-    steps.push('Raise the floor of the housing above ground level and slope the yard away from it so manure and water drain outward, not inward.');
-  }
+  for (const s of sectors) steps.push(sectors.length > 1 ? `${SECTOR_SHORT[s]}: ${OWN_DRAINAGE[s]}` : OWN_DRAINAGE[s]);
+  if (sectors.length > 1) steps.push('Run a shallow drain along the paths between the parts of the farm, so water from ponds or animal pens never flows into the beds or the orchard.');
   if (input.site.slope === 'steep') {
     steps.push('Steep slope: build contour terraces or bunds and a cut-off drain upslope; plant grass on canal edges to stop erosion.');
   }
@@ -108,24 +133,27 @@ export function drainagePlan(input: PlanInput, usedArea: number, widthM: number,
 
 export function electricalPlan(
   input: PlanInput,
-  allocs: AllocTarget[],
+  parts: Part[],
   usedArea: number,
   pumpHp: number,
 ): ElectricalPlan {
   const loads: { label: string; watts: number; hoursPerDay: number }[] = [];
   if (pumpHp > 0) loads.push({ label: `Water pump (${pumpHp} HP)`, watts: Math.round(pumpHp * 746), hoursPerDay: 1.5 });
 
-  if (input.sector === 'fish') {
+  const fish = parts.find((p) => p.sector === 'fish');
+  if (fish) {
     // extensive bangus ponds don't need mechanical aeration; size it for the intensive species only
-    const intensiveArea = allocs.filter((a) => a.item.id !== 'bangus').reduce((s, a) => s + a.areaSqm, 0);
+    const intensiveArea = fish.allocs.filter((a) => a.item.id !== 'bangus').reduce((s, a) => s + a.areaSqm, 0);
     if (intensiveArea > 0) {
       loads.push({ label: 'Aeration (blower / paddlewheel)', watts: Math.round(Math.max(60, intensiveArea * 0.8)), hoursPerDay: 12 });
     }
   }
-  if (input.sector === 'livestock') {
-    loads.push({ label: 'House lighting (LED)', watts: Math.round(Math.max(20, usedArea * 1.5)), hoursPerDay: 6 });
-    if (allocs.some((a) => a.item.id === 'broiler')) {
-      loads.push({ label: 'Brooder heating (first 2 weeks, averaged)', watts: Math.round(Math.max(100, usedArea * 25)), hoursPerDay: 3 });
+  const animals = parts.find((p) => p.sector === 'livestock');
+  if (animals) {
+    const houses = parts.length === 1 ? usedArea : animals.usedSqm;
+    loads.push({ label: 'House lighting (LED)', watts: Math.round(Math.max(20, houses * 1.5)), hoursPerDay: 6 });
+    if (animals.allocs.some((a) => a.item.id === 'broiler')) {
+      loads.push({ label: 'Brooder heating (first 2 weeks, averaged)', watts: Math.round(Math.max(100, houses * 25)), hoursPerDay: 3 });
     }
   }
   if (usedArea >= 50) loads.push({ label: 'Security light (LED)', watts: 20, hoursPerDay: 10 });

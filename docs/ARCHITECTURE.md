@@ -99,8 +99,8 @@ Today there is one copy of the server on the owner's PC. The design lets more co
 
 ## Limits of today's design (numbers to watch)
 
-- Atlas M0 (free): 512 MB, about 250 accounts at the full 2 MB each (most use far less), **no automatic backups**, and only
-  allowed IP addresses can connect.
+- Atlas M0 (free): 512 MB, about 250 accounts at the full 2 MB each (most use far less), **no automatic backups** (the owner's PC
+  makes them with `scripts/backup.ts`, see the roadmap), and only allowed IP addresses can connect.
 - One account's farm data: 2 MB, stored as one document that is rewritten when something changes.
 - Chat: contact list shows the 1000 most recently active people; history the last 500 messages per person.
 - AI calls take up to 90 s (pictures up to 150 s). Many proxies cut requests at 100 s.
@@ -110,7 +110,7 @@ Today there is one copy of the server on the owner's PC. The design lets more co
 | What | Why | When (trigger) |
 |---|---|---|
 | Hosting with HTTPS (Fly.io, Railway, Render or a VPS, behind Cloudflare) | Phones only install the app, work offline and show notifications on HTTPS | before real users |
-| MongoDB backups (Atlas Flex/M10, or a daily `mongodump`) | M0 has no backups: a mistake or outage could lose accounts and farm data | before real users |
+| MongoDB backups. **Free version built 19 October 2026:** `scripts/backup.ts` (daily with Windows Task Scheduler, keeps 14, Extended JSON per collection) and `scripts/restore.ts` (README "Backing up your data"). Still open: a copy away from the owner's PC, or Atlas Flex/M10 built-in snapshots (paid) | M0 has no backups: a mistake or outage could lose accounts and farm data; a backup on one PC is lost with that PC | daily task: before real users; off-PC copy or paid snapshots: with hosting |
 | Error tracking (e.g. Sentry) and uptime checks | Find problems before farmers report them | with hosting |
 | Version check: tell old installed apps to reload | An installed app can run old code against a new server | before the first breaking API change |
 | AI as background jobs (start, then check back) | Proxies often cut requests at 100 s; pictures can take 150 s | with hosting behind such a proxy |

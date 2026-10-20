@@ -29,6 +29,7 @@ export function Permits() {
       <PageHeader title="Permits & Compliance" sub="What you usually need to start legally in the Philippines." actions={<Button size="sm" variant="secondary" onClick={copy}><LuCopy size={14} /> Copy list</Button>} />
       <div className="stack">
         <Pills value={sector} onChange={(id: PermitSector) => setState((st) => ({ ...st, permitSector: id }))} items={PERMIT_SECTORS} />
+        <p className="small muted">Vegetables, crops and fruits are under Agriculture, fish under Aquaculture. A mixed farm: check the list for each type you have.</p>
         <Card>
           <div className="row between"><b>Mandatory steps done</b><span className="bold">{done} / {mandatory.length}</span></div>
           <div style={{ marginTop: 8 }}><Progress value={pct} label="Permit progress" /></div>

@@ -6,9 +6,10 @@ import { initialState } from '@/core/store';
 import { generatePlan } from '@/services/planner';
 import { DEFAULT_PLACE } from '@/data/places';
 import {
-  applyRecords, collectRecords, keyOf, MAX_CHANGES, PREF_IDS, RECORD_MAX_BYTES, SYNC_COLLECTIONS, SYNC_MAX_BYTES, utf8Bytes, validRecord,
+  applyRecords, cleanBackup, collectRecords, keyOf, MAX_CHANGES, PREF_IDS, RECORD_MAX_BYTES, SYNC_COLLECTIONS, SYNC_MAX_BYTES, utf8Bytes, validRecord,
   type WireRecord,
 } from '@/services/sync/records';
+import { SECTORS } from '@/data/catalog';
 import { changesFrom, emptyMeta, planLink, scan, syncOnce, type SyncIO, type SyncMeta } from '@/services/sync/engine';
 import { agoText, syncWords } from '@/components/SyncStatus';
 import type { AppState, Expense, Farm, PlanInput, SavedPlan } from '@/types';
@@ -128,6 +129,37 @@ describe('records on the phone', () => {
     expect(validRecord({ c: 'prefs', id: 'watchlist', t: 1, d: { id: 'watchlist', value: ['a'] } })).toBe(true);
     expect(validRecord({ c: 'prefs', id: 'watchlist', t: 1, d: { id: 'watchlist', value: 'a' } })).toBe(false);
     expect(validRecord({ c: 'prefs', id: 'apiBase', t: 1, d: { id: 'apiBase', value: 'x' } })).toBe(false);
+  });
+
+  test('fruit and mixed plans and farms travel; old single-type ones still do; unknown types are refused', () => {
+    const mixedInput: PlanInput = { ...planInput, sector: 'crops', sectors: ['crops', 'fruits', 'fish'] };
+    const mixed: SavedPlan = { id: nid('plan'), createdAt: new Date().toISOString(), input: mixedInput, result: generatePlan(mixedInput) };
+    const fruitInput: PlanInput = { ...planInput, sector: 'fruits', sectors: ['fruits'] };
+    const fruit: SavedPlan = { id: nid('plan'), createdAt: new Date().toISOString(), input: fruitInput, result: generatePlan(fruitInput) };
+    const old = plan(); // made before 20 October 2026: no `sectors`
+    expect(old.input.sectors).toBeUndefined();
+    for (const p of [mixed, fruit, old]) expect(validRecord({ c: 'plans', id: p.id, t: 1, d: p })).toBe(true);
+    const bad = (sectors: unknown) => validRecord({ c: 'plans', id: mixed.id, t: 1, d: { ...mixed, input: { ...mixedInput, sectors } } });
+    expect(bad([])).toBe(false);
+    expect(bad(['crops', 'trees'])).toBe(false);
+    expect(bad('crops')).toBe(false);
+    expect(validRecord({ c: 'plans', id: old.id, t: 1, d: { ...old, input: { ...old.input, sector: 'trees' } } })).toBe(false);
+
+    const mixedFarm: Farm = { ...farm('Mixed'), sector: 'crops', sectors: ['crops', 'fish'] };
+    const fruitFarm: Farm = { ...farm('Orchard'), sector: 'fruits' };
+    expect(validRecord({ c: 'farms', id: mixedFarm.id, t: 1, d: mixedFarm })).toBe(true);
+    expect(validRecord({ c: 'farms', id: fruitFarm.id, t: 1, d: fruitFarm })).toBe(true);
+    expect(validRecord({ c: 'farms', id: mixedFarm.id, t: 1, d: { ...mixedFarm, sectors: ['crops', 'bees'] } })).toBe(false);
+    const fruitItem = { ...fullState().customItems[0], id: 'custom-pomelo', name: 'Pomelo', sector: 'fruits', areaKind: 'orchard' };
+    expect(validRecord({ c: 'customItems', id: fruitItem.id, t: 1, d: fruitItem })).toBe(true);
+
+    // a backup file with old and new plans restores all of them, and drops the broken one
+    const broken = { ...mixed, id: nid('plan'), input: { ...mixedInput, sectors: ['nope'] } };
+    const { patch, skipped } = cleanBackup({ plans: [old, mixed, fruit, broken], farms: [mixedFarm, fruitFarm] });
+    expect(patch.plans!.map((p) => p.id)).toEqual([old.id, mixed.id, fruit.id]);
+    expect(patch.farms!.length).toBe(2);
+    expect(skipped).toBe(1);
+    expect([...SECTORS]).toEqual(['crops', 'fruits', 'fish', 'livestock']);
   });
 
   test('new items land where this phone would put them; changes keep their place; deletes remove', () => {

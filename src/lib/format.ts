@@ -85,3 +85,14 @@ export function greeting(now = new Date()): string {
 }
 
 export const sum = (xs: number[]): number => xs.reduce((a, b) => a + b, 0);
+
+/** Whole percentages of the total that add up to exactly 100 (largest remainder), so a list never shows 99% or 101%. */
+export function wholePercents(parts: number[]): number[] {
+  const total = sum(parts);
+  if (!(total > 0)) return parts.map(() => 0);
+  const exact = parts.map((n) => (n / total) * 100);
+  const whole = exact.map(Math.floor);
+  const left = 100 - sum(whole);
+  exact.map((e, i) => ({ i, rest: e - Math.floor(e) })).sort((a, b) => b.rest - a.rest).slice(0, left).forEach(({ i }) => { whole[i]++; });
+  return whole;
+}

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { addDays, parseNumber, prettyDate } from '@/lib/format';
+import { addDays, parseNumber, prettyDate, wholePercents } from '@/lib/format';
 import { csvCell, toCsv } from '@/lib/csv';
 
 describe('parseNumber (what people type in number boxes)', () => {
@@ -46,5 +46,17 @@ describe('CSV export', () => {
     const csv = toCsv([['item', 'buyer'], ['Talong', 'Niño']]);
     expect(csv.charCodeAt(0)).toBe(0xfeff);
     expect(csv).toBe('﻿"item","buyer"\r\n"Talong","Niño"\r\n');
+  });
+});
+
+describe('wholePercents (budget split by type)', () => {
+  test('always adds up to exactly 100', () => {
+    expect(wholePercents([1571, 1123, 132])).toEqual([55, 40, 5]); // 55.6, 39.7, 4.7
+    expect(wholePercents([1, 1, 1])).toEqual([34, 33, 33]);
+    expect(wholePercents([10900, 2400, 11900, 13800, 23000]).reduce((a, b) => a + b, 0)).toBe(100);
+    expect(wholePercents([5, 5])).toEqual([50, 50]);
+  });
+  test('nothing to split gives zeros', () => {
+    expect(wholePercents([0, 0])).toEqual([0, 0]);
   });
 });

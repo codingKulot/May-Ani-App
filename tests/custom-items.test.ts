@@ -1,7 +1,7 @@
 import { describe, expect, test, afterEach } from 'bun:test';
 import { generatePlan } from '@/services/planner';
 import { DEFAULT_PLACE } from '@/data/places';
-import { CATALOG, allItems, buildCustomItem, catalogById, itemsFor, setCustomItems } from '@/data/catalog';
+import { CATALOG, allItems, buildCustomItem, catalogById, itemsFor, plantsLabel, setCustomItems } from '@/data/catalog';
 import { referenceSnapshot } from '@/services/market';
 import type { PlanInput, Sector } from '@/types';
 
@@ -13,6 +13,25 @@ const mk = (o: Partial<PlanInput> = {}): PlanInput => ({
 afterEach(() => setCustomItems([]));
 
 describe('buildCustomItem', () => {
+  test('a fruit of your own: a tree that takes over a year bears once a year; a short-season fruit keeps its own cycle', () => {
+    const tree = buildCustomItem({ name: 'Pomelo', sector: 'fruits', farmGatePerKg: 60, daysToHarvest: 1100 });
+    expect(tree.ok).toBe(true);
+    if (!tree.ok) return;
+    expect(tree.item.sector).toBe('fruits');
+    expect(tree.item.cycleDays).toBe(365);
+    expect(tree.item.perPlantSqm).toBeGreaterThan(0);
+    expect(tree.item.emoji).toBe('🌳');
+    expect(tree.item.notes).toContain('typical fruits');
+    // estimated from the fruit trees: tree spacing, counted in trees
+    expect(tree.item.perPlantSqm).toBe(36);
+    expect(plantsLabel(tree.item, 72)).toBe('about 2 trees');
+    const melon = buildCustomItem({ name: 'Melon', sector: 'fruits', farmGatePerKg: 40, daysToHarvest: 75 });
+    expect(melon.ok && melon.item.cycleDays).toBeGreaterThan(75);
+    // the same name may exist in another type (a vegetable "Calamansi" added before Fruits existed stays valid)
+    expect(buildCustomItem({ name: 'Mango', sector: 'crops', farmGatePerKg: 80 }).ok).toBe(true);
+    expect(buildCustomItem({ name: 'Mango', sector: 'fruits', farmGatePerKg: 80 }).ok).toBe(false);
+  });
+
   test('builds a complete item from just a name and a price', () => {
     const r = buildCustomItem({ name: '  Calamansi ', sector: 'crops', farmGatePerKg: 60 });
     expect(r.ok).toBe(true);
@@ -35,6 +54,7 @@ describe('buildCustomItem', () => {
   test('area kind follows the sector', () => {
     const kind = (s: Sector) => { const r = buildCustomItem({ name: 'Thing', sector: s, farmGatePerKg: 100 }); return r.ok ? r.item.areaKind : null; };
     expect(kind('crops')).toBe('bed');
+    expect(kind('fruits')).toBe('orchard');
     expect(kind('fish')).toBe('pond');
     expect(kind('livestock')).toBe('house');
   });
@@ -87,6 +107,8 @@ describe('planner includes a custom favourite', () => {
     ['crop, hectare', 'crops', { areaSqm: 10000, capital: 150000, experience: 'intermediate' }],
     ['fish, pond', 'fish', { areaSqm: 500, capital: 120000, experience: 'intermediate' }],
     ['livestock, house', 'livestock', { areaSqm: 100, capital: 90000 }],
+    ['fruit, orchard', 'fruits', { areaSqm: 500, capital: 100000 }],
+    ['fruit, in a mix with vegetables', 'fruits', { sector: 'crops', sectors: ['crops', 'fruits'], areaSqm: 300, capital: 80000 }],
   ];
   for (const [label, sector, o] of cases) {
     test(label, () => {
@@ -94,6 +116,7 @@ describe('planner includes a custom favourite', () => {
       if (!r.ok) throw new Error('build');
       setCustomItems([r.item]);
       const plan = generatePlan(mk({ sector, ...o, preferred: [r.item.id] }));
+      expect(plan.allocations.every((a) => a.itemId === r.item.id || (o.sectors ?? [sector]).includes(catalogById(a.itemId)!.sector))).toBe(true);
       expect(plan.allocations.some((a) => a.itemId === r.item.id)).toBe(true);
       expect(plan.cost.initial).toBeGreaterThan(0);
       expect(Number.isFinite(plan.cost.initial)).toBe(true);
