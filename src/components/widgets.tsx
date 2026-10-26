@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import {
-  LuCloud, LuCloudRain, LuCloudSun, LuLocateFixed, LuMapPin, LuSun, LuWaves, LuZap,
+  LuApple, LuBeef, LuCloud, LuCloudRain, LuCloudSun, LuFish, LuLocateFixed, LuMapPin, LuSprout, LuSun, LuWaves, LuZap,
 } from 'react-icons/lu';
-import type { AppIcon, GeoPlace } from '@/types';
+import type { AppIcon, GeoPlace, Sector } from '@/types';
 import { placeLabel } from '@/data/places';
 import { locateMe, searchAnyPlace } from '@/services/geocode';
 import { describeCode, type WxIcon } from '@/services/weather';
@@ -16,6 +16,14 @@ export function WeatherIcon({ code, size = 28 }: { code: number; size?: number }
   const C = map[icon];
   const color = icon === 'sun' || icon === 'cloud-sun' ? '#e8a317' : icon === 'rain' || icon === 'storm' ? '#1c6fb8' : '#6b7c88';
   return <C size={size} color={color} aria-hidden="true" />;
+}
+
+const SECTOR_ICON: Record<Sector, AppIcon> = { crops: LuSprout, fruits: LuApple, fish: LuFish, livestock: LuBeef };
+
+/** A farm type's icon on its tinted tile (green crops, yellow fruits, blue fish, red livestock: `.ic.<sector>` in styles.css). */
+export function SectorIcon({ sector, size = 22 }: { sector: Sector; size?: number }) {
+  const Icon = SECTOR_ICON[sector] ?? LuSprout;
+  return <span className={`ic ${sector}`} aria-hidden="true"><Icon size={size} /></span>;
 }
 
 /** Search-as-you-type place picker (bundled list + online geocoder) with "use my location". */

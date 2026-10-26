@@ -161,10 +161,11 @@ export function Stat(p: { label: ReactNode; value: ReactNode; sub?: ReactNode; t
   );
 }
 
-export function Progress(p: { value: number; warn?: boolean; label?: string }) {
+/** `tone` colors the bar by farm type (fish blue, fruits yellow, livestock red; crops keep the default green). */
+export function Progress(p: { value: number; warn?: boolean; label?: string; tone?: 'crops' | 'fruits' | 'fish' | 'livestock' }) {
   const v = Math.max(0, Math.min(100, p.value));
   return (
-    <div className={`progress ${p.warn ? 'warn' : ''}`} role="progressbar" aria-valuenow={Math.round(v)} aria-valuemin={0} aria-valuemax={100} aria-label={p.label}>
+    <div className={`progress ${p.warn ? 'warn' : ''} ${p.tone ?? ''}`} role="progressbar" aria-valuenow={Math.round(v)} aria-valuemin={0} aria-valuemax={100} aria-label={p.label}>
       <i style={{ width: `${v}%` }} />
     </div>
   );

@@ -85,7 +85,7 @@ export function Shell({ children, title }: { children: ReactNode; title?: string
           );
         })}
         <button onClick={() => setMore(true)} aria-haspopup="dialog" className={MORE_ITEMS.some((m) => isActive(m, path)) ? 'active' : ''}>
-          <LuEllipsis size={22} /> More
+          <span className="tab-icon"><LuEllipsis size={22} /></span>More
         </button>
       </nav>
 

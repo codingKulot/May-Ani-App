@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import {
-  LuBell, LuBookOpen, LuCircleAlert, LuClipboardList, LuCloudSun, LuMapPin, LuShieldCheck, LuSparkles, LuSprout, LuStethoscope, LuWallet,
-  LuTrendingUp, LuTrendingDown, LuReceipt, LuRefreshCw, LuTriangleAlert,
+  LuBell, LuBookOpen, LuCircleAlert, LuCircleCheck, LuClipboardList, LuCloudSun, LuMapPin, LuSparkles,
+  LuStethoscope, LuTag, LuWallet, LuWheat, LuTrendingUp, LuTrendingDown, LuReceipt, LuRefreshCw, LuTriangleAlert,
 } from 'react-icons/lu';
 import { Link } from '@/core/router';
 import { useAppState } from '@/core/store';
@@ -12,8 +12,8 @@ import { verseForDate } from '@/data/verses';
 import { addDays, daysBetween, greeting, isoDate, peso, prettyDate, sum, timeAgo } from '@/lib/format';
 import { advisories, describeCode } from '@/services/weather';
 import { nearestFault } from '@/services/hazards';
-import { Alert, Button, Card, Empty, LinkButton, PageHeader, Progress, Stat, Tabs } from '@/components/ui';
-import { WeatherIcon } from '@/components/widgets';
+import { Alert, Button, Card, Empty, LinkButton, Progress, Stat, Tabs } from '@/components/ui';
+import { SectorIcon, WeatherIcon } from '@/components/widgets';
 
 const monthKey = (iso: string) => iso.slice(0, 7);
 
@@ -58,54 +58,64 @@ export function Dashboard() {
   const adv = wx.data ? advisories(wx.data) : [];
   const fault = nearestFault(profile.location);
   const firstName = profile.name.split(' ')[0];
+  const alertCount = adv.length + stats.alerts;
 
   return (
     <div className="page">
-      <PageHeader
-        title={`${greeting()}, ${firstName}!`}
-        sub={<span className="row" style={{ gap: 6 }}><LuMapPin size={14} /> {placeLabel(profile.location)} · {prettyDate(today)}</span>}
-        actions={<Link to="/weather" className="icon-btn" title="Alerts"><LuBell size={20} />{adv.length + stats.alerts > 0 ? <span className="badge red" style={{ position: 'relative', left: -10, top: -10, padding: '1px 6px' }}>{adv.length + stats.alerts}</span> : null}</Link>}
-      />
-
-      <div className="grid cols-2" style={{ marginBottom: 14 }}>
-        <div className="weather-card">
-          {wx.data ? (
-            <div className="row" style={{ gap: 14 }}>
-              <WeatherIcon code={wx.data.current.code} size={44} />
-              <div className="grow">
-                <div className="wx-temp">{wx.data.current.tempC}°C</div>
-                <div className="small muted">{describeCode(wx.data.current.code).label} · H: {wx.data.daily[0].maxC}° L: {wx.data.daily[0].minC}°</div>
-              </div>
-              <Link to="/weather" className="small bold">Forecast</Link>
-            </div>
-          ) : wx.loading ? (
-            <div className="row"><span className="spinner" /> <span className="muted small">Loading weather…</span></div>
-          ) : (
-            <div className="row"><LuCloudSun size={30} color="#6b7c88" /><div className="small muted grow">Weather is unavailable right now. {wx.error}</div><Button size="sm" variant="secondary" onClick={wx.reload}>Retry</Button></div>
-          )}
+      <header className="hello">
+        <div className="grow">
+          <small><LuMapPin size={14} /> {placeLabel(profile.location)} · {prettyDate(today)}</small>
+          <h1>{greeting()}, {firstName}!</h1>
         </div>
+        <Link to="/weather" className="bell" title="Alerts" aria-label={`Alerts${alertCount ? `: ${alertCount}` : ''}`}>
+          <LuBell size={20} />{alertCount > 0 ? <span className="nav-count">{alertCount}</span> : null}
+        </Link>
+      </header>
+
+      <div className="dash-top">
         <div className="stack sm">
-          {adv.length > 0 ? (
-            <Alert tone={adv[0].severity === 'danger' ? 'red' : 'orange'} title={adv[0].title} action={<Link to="/weather" className="more">View details</Link>}>{adv[0].detail}</Alert>
-          ) : wx.data ? (
-            <Alert tone="green" title="No weather warnings in the next 3 days">Good conditions for field work. Always check PAGASA for official advisories.</Alert>
-          ) : null}
+          <section className="wx-hero" aria-label="Weather">
+            {wx.data ? (
+              <>
+                <div className="row" style={{ alignItems: 'flex-start' }}>
+                  <div className="grow">
+                    <div className="place">{profile.location.name}</div>
+                    <div className="temp">{wx.data.current.tempC}°</div>
+                    <div className="desc">{describeCode(wx.data.current.code).label} · H {wx.data.daily[0].maxC}° L {wx.data.daily[0].minC}°</div>
+                  </div>
+                  <span className="wx-ico"><WeatherIcon code={wx.data.current.code} size={56} /></span>
+                </div>
+                {adv.length > 0 ? (
+                  <Link to="/weather" className={`wx-chip ${adv[0].severity === 'danger' ? 'red' : ''}`}>
+                    <LuTriangleAlert size={16} /><span>{adv[0].title}. {adv[0].detail}</span>
+                  </Link>
+                ) : (
+                  <div className="wx-chip ok"><LuCircleCheck size={16} /><span>No weather warnings in the next 3 days. Good for field work.</span></div>
+                )}
+                <Link to="/weather" className="more">See 7-day forecast</Link>
+              </>
+            ) : wx.loading ? (
+              <div className="row"><span className="spinner" /> <span className="small">Loading weather…</span></div>
+            ) : (
+              <div className="row"><LuCloudSun size={30} /><div className="small grow">Weather is unavailable right now. {wx.error}</div><Button size="sm" onClick={wx.reload}>Retry</Button></div>
+            )}
+          </section>
           {fault && fault.km <= 20 ? (
             <Alert tone="orange" title="Fault line nearby" action={<Link to="/weather" className="more">View map</Link>}>
               About {Math.round(fault.km)} km from a mapped active fault ({fault.fault.name}).
             </Alert>
           ) : null}
         </div>
+
+        <nav className="quick-grid dash-quick" aria-label="Quick actions" style={{ marginBottom: 0 }}>
+          <Link to="/health"><span className="qi"><LuStethoscope size={24} /></span>Check health</Link>
+          <Link to="/market"><span className="qi yellow"><LuTag size={24} /></span>Prices</Link>
+          <Link to="/planner"><span className="qi blue"><LuClipboardList size={24} /></span>Plan</Link>
+          <Link to="/manage/production"><span className="qi green"><LuWheat size={24} /></span>Records</Link>
+        </nav>
       </div>
 
-      <div className="quick-grid only-mobile" style={{ marginBottom: 14 }}>
-        <Link to="/planner"><LuClipboardList size={22} />Plan</Link>
-        <Link to="/health"><LuStethoscope size={22} />Health</Link>
-        <Link to="/weather"><LuCloudSun size={22} />Weather</Link>
-        <Link to="/permits"><LuShieldCheck size={22} />Permits</Link>
-      </div>
-
-      <div className="grid stats" style={{ marginBottom: 14 }}>
+      <div className="grid stats dash-stats">
         <Stat tone="red" icon={<LuWallet size={14} />} label="Total expenses" value={peso(stats.exp)}
           sub={stats.expPct === null ? 'This month' : <span className={stats.expPct > 0 ? 'down' : 'up'}>{stats.expPct > 0 ? <LuTrendingUp size={12} /> : <LuTrendingDown size={12} />} {Math.abs(stats.expPct)}% vs last month</span>} />
         <Stat tone="green" icon={<LuReceipt size={14} />} label="Total sales" value={peso(stats.sales)}
@@ -122,13 +132,32 @@ export function Dashboard() {
                 Tell us about your land and budget and we will draft a full plan: crops, layout, water, drainage and costs.
               </Empty>
             ) : (
-              <div className="list">
-                {s.farms.slice(0, 3).map((f) => (
-                  <Link key={f.id} to={`/farms/${f.id}`} className="item">
-                    <span className="thumb"><LuSprout size={22} color="#0f6b3a" /></span>
-                    <div className="grow"><div className="bold">{f.name}</div><div className="small muted">{sectorsLabel(planSectors(f))} · {f.areaSqm >= 10000 ? `${(f.areaSqm / 10000).toFixed(2)} ha` : `${f.areaSqm} sqm`}</div></div>
-                  </Link>
-                ))}
+              <div className="farm-cards">
+                {s.farms.slice(0, 3).map((f) => {
+                  const sector = planSectors(f)[0] ?? f.sector;
+                  // the newest crop or batch on this farm that is not harvested yet: shows how far along it is
+                  const growing = s.production.filter((p) => p.farmId === f.id && !p.harvestedOn).sort((a, b) => b.plantedOn.localeCompare(a.plantedOn))[0];
+                  const item = growing ? catalogById(growing.itemId) : undefined;
+                  const elapsed = growing ? Math.max(0, daysBetween(growing.plantedOn, today)) : 0;
+                  const pct = item ? Math.min(100, Math.round((elapsed / item.daysToHarvest) * 100)) : 0;
+                  const left = item ? Math.max(0, item.daysToHarvest - elapsed) : 0;
+                  return (
+                    <Link key={f.id} to={`/farms/${f.id}`} className="farm-card">
+                      <div className="row">
+                        <SectorIcon sector={sector} />
+                        <div className="grow">
+                          <div className="bold">{f.name}</div>
+                          <div className="small muted">
+                            {item ? (left === 0 ? `${item.name} ready to harvest` : `${item.name} · harvest in ${left} days`)
+                              : `${sectorsLabel(planSectors(f))} · ${f.areaSqm >= 10000 ? `${(f.areaSqm / 10000).toFixed(2)} ha` : `${f.areaSqm} sqm`}`}
+                          </div>
+                        </div>
+                        {item ? <span className="pct">{pct}%</span> : null}
+                      </div>
+                      {item ? <Progress value={pct} tone={sector} label={`${item.name} progress`} /> : null}
+                    </Link>
+                  );
+                })}
               </div>
             )}
           </Card>
@@ -148,7 +177,7 @@ export function Dashboard() {
                   return (
                     <div key={p.id} className="stack sm">
                       <div className="row between"><span className="bold">{item?.emoji} {item?.name}</span><span className="small muted">{done ? `Harvested ${p.harvestedKg} kg` : left === 0 ? 'Ready to harvest' : `${left} days to harvest`}</span></div>
-                      <Progress value={done ? 100 : pct} label={`${item?.name} progress`} />
+                      <Progress value={done ? 100 : pct} tone={item?.sector} label={`${item?.name} progress`} />
                     </div>
                   );
                 })}

@@ -95,6 +95,20 @@ chat contacts, the separate chat token (`may-ani.chatToken` is deleted on connec
 - `server/mail.mjs` email sender: Gmail SMTP with an app password (nodemailer, port 465 TLS; STARTTLS required on other ports except to a loopback test server). `mailProblem(e)` turns errors into log hints and never includes the password.
 - `server/sync.mjs` account data sync: `POST /api/sync` (see below). Store methods `loadAppData`/`appDataHead`/`saveAppData` live in `server/auth.mjs` (collection `appdata`). Fast path: no changes sent and `since` equals the account's `rev` → only `rev`/`bytes` are read (projection), not the whole document.
 
+## Look: "tonal & rounded" (UI revamp, 26 October 2026)
+Owner picked Direction 1 of 5 (proposal artifact "May-Ani UI Directions"). Rule from the owner: the new look must not slow the app.
+- CSS only (`src/styles.css` tokens at the top: `--surface-2`, `--tonal-green/yellow/blue/red/orange`, `--radius` 22px). No UI kit,
+  no animation library, no Tailwind. Soft tinted surfaces instead of bordered white boxes; pill buttons, chips, tabs (segmented) and
+  a pill behind the active bottom tab; colors mean something: green growing, yellow heads-up, blue water/fish, red problem.
+- Font: Plus Jakarta Sans (OFL, `src/fonts/OFL.txt`), one variable WOFF2 for Latin (27 KB) plus a 1 KB peso-sign file (the Latin
+  file has no ₱). `scripts/build.ts` keeps them out of the CSS (`external: ['./fonts/*']`, else Bun inlines them as base64) and
+  copies `src/fonts` to `dist/fonts`, with a preload tag. `server/static.mjs` serves `.woff2` as `font/woff2`. CSP `font-src 'self'`.
+- Dashboard: greeting header with alerts bell, `.wx-hero` weather card with the top advisory inside, 4 round quick actions
+  (2x2 card beside the weather from 960px), farm cards with the newest unharvested crop's progress. `SectorIcon` (`widgets.tsx`)
+  gives each farm type its icon and tint (Dashboard and My Farms). `Progress` takes `tone` (sector) for the bar color.
+- Size on 26 October 2026: CSS 26 -> 31 KB raw (5.6 -> 6.5 KB brotli), JS +0.5 KB brotli, plus the 28 KB font once (cached).
+- Not done yet: dark theme (Direction 3 as an option), other pages only got the shared restyle, not their own redesign.
+
 ## Account data sync (built 18 October 2026)
 A logged-in user's farms, plans, tasks, expenses, sales, production records, health log, own catalog items and a few choices
 (permit checklist and sector, watch list, own market and material prices) follow the account, so logging in on a new phone brings them back.

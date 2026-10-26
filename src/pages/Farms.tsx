@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import { LuApple, LuFish, LuLeaf, LuPlus, LuSparkles, LuSprout, LuTractor, LuTrash2 } from 'react-icons/lu';
+import { LuApple, LuFish, LuLeaf, LuPlus, LuSparkles, LuTractor, LuTrash2 } from 'react-icons/lu';
 import { Link, navigate } from '@/core/router';
 import { useAppState } from '@/core/store';
 import { addExistingFarm, removeFarm, setActiveFarm } from '@/core/actions';
@@ -13,7 +13,7 @@ import {
 } from '@/services/farmForm';
 import type { LandTenure, Sector, WaterSource } from '@/types';
 import { Badge, Button, Card, Chips, Empty, Field, LinkButton, NumberInput, PageHeader, Sheet, Stat, ToggleChips, askConfirm, toast } from '@/components/ui';
-import { PlaceSelect } from '@/components/widgets';
+import { PlaceSelect, SectorIcon } from '@/components/widgets';
 
 const areaLabel = (sqm: number) => (sqm >= 10000 ? `${(sqm / 10000).toFixed(2)} ha` : `${sqm} sqm`);
 
@@ -35,7 +35,7 @@ export function Farms() {
         <div className="grid cols-2">
           {s.farms.map((f) => (
             <Link key={f.id} to={`/farms/${f.id}`} className="card item" >
-              <span className="thumb"><LuSprout size={24} color="#0f6b3a" /></span>
+              <SectorIcon sector={planSectors(f)[0] ?? f.sector} />
               <div className="grow">
                 <div className="bold">{f.name}</div>
                 <div className="small muted">{sectorsLabel(planSectors(f))} · {areaLabel(f.areaSqm)}</div>

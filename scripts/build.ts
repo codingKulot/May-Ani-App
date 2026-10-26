@@ -11,12 +11,16 @@ const result = await Bun.build({
   sourcemap: 'linked',
   // Marks this as the real app: React's smaller, faster production build, and the offline service worker in src/main.tsx.
   define: { 'process.env.NODE_ENV': '"production"' },
+  // The app font (src/fonts) is copied below as its own files, not inlined: inlined it would make the stylesheet 37 KB bigger and
+  // hold up the first paint, while a separate file loads alongside and is cached once (font-display: swap in styles.css).
+  external: ['./fonts/*'],
 });
 if (!result.success) {
   for (const log of result.logs) console.error(log);
   process.exit(1);
 }
 await cp('public', 'dist', { recursive: true });
+await cp('src/fonts', 'dist/fonts', { recursive: true });
 
 // PWA tags live here (not in index.html) because Bun's HTML bundler would try to resolve them as source files.
 const html = await Bun.file('dist/index.html').text();
@@ -24,6 +28,8 @@ const tags = [
   '<link rel="manifest" href="./manifest.webmanifest">',
   '<link rel="icon" href="./icon.svg" type="image/svg+xml">',
   '<link rel="apple-touch-icon" href="./apple-touch-icon.png">', // iPhones ignore SVG here; the PNGs in /public were made from icon.svg
+  // start the font download with the page instead of after the stylesheet is read (crossorigin is required for fonts, even same-site)
+  '<link rel="preload" href="./fonts/plus-jakarta-sans-latin.woff2" as="font" type="font/woff2" crossorigin>',
 ].join('');
 await Bun.write('dist/index.html', html.replace('</head>', `${tags}</head>`));
 
