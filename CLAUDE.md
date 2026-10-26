@@ -109,6 +109,17 @@ Owner picked Direction 1 of 5 (proposal artifact "May-Ani UI Directions"). Rule 
 - Size on 26 October 2026: CSS 26 -> 31 KB raw (5.6 -> 6.5 KB brotli), JS +0.5 KB brotli, plus the 28 KB font once (cached).
 - Not done yet: dark theme (Direction 3 as an option), other pages only got the shared restyle, not their own redesign.
 
+## Learning Center: "Start here" beginner paths (built 26 October 2026)
+- `src/data/startPaths.ts`: 8 step-by-step paths for total beginners (before you start: RSBSA/FishR, ATI e-Learning, PCIC
+  insurance, ACPC ANYO loan; vegetables; rice (PhilRice PalayCheck 9 key checks); fruit trees; tilapia; native chicken;
+  backyard pigs with ASF biosecurity; goats). Each has quick facts, a "before you spend" checklist, numbered steps with tips,
+  mistakes, who to ask locally, reading links and YouTube videos. The short guides in `data/learn.ts` stay as "Quick guides".
+- Pages: `/learn` (path cards + quick guides) and `/learn/:id` (`LearnPath` in `pages/Learn.tsx`). CSS under "Learning Center" at the end of `styles.css`.
+- Every link and video was opened on 26 October 2026 and its publisher checked (videos through YouTube oEmbed). `official` = government
+  or public research (DA, ATI, PhilRice, BFAR, BAI, DTI-PCAARRD, SEAFDEC, FAO, ACIAR); others are independent Filipino channels, shown by
+  channel name with an "Independent" badge. Money and timing are labeled rough 2026 estimates on the page. Re-check links now and then.
+- Test: `tests/start-paths.test.ts` (unique ids, every section filled, https links, videos on YouTube, at least one official source per path).
+
 ## Account data sync (built 18 October 2026)
 A logged-in user's farms, plans, tasks, expenses, sales, production records, health log, own catalog items and a few choices
 (permit checklist and sector, watch list, own market and material prices) follow the account, so logging in on a new phone brings them back.

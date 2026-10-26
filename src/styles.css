@@ -561,3 +561,57 @@ a.farm-card:hover { text-decoration: none; background: var(--surface-2); }
   .dash-quick .qi.yellow { background: var(--tonal-orange); } .dash-quick .qi.blue { background: var(--tonal-blue); } .dash-quick .qi.green { background: var(--tonal-green); }
 }
 .ic { width: 44px; height: 44px; border-radius: 14px; display: inline-grid; place-items: center; flex-shrink: 0; }
+
+/* ---------- Learning Center: "Start here" beginner paths (Direction 1: tonal & rounded) ---------- */
+.learn-start { display: grid; gap: 8px; }
+.learn-h2 { margin-top: 6px; }
+.path-cards { display: grid; gap: 10px; margin-top: 4px; }
+@media (min-width: 720px) { .path-cards { grid-template-columns: repeat(2, 1fr); } }
+.path-card { display: flex; align-items: center; gap: 12px; padding: 14px; border-radius: 20px; background: var(--card); color: inherit; text-decoration: none; box-shadow: var(--shadow); }
+a.path-card:hover { text-decoration: none; background: var(--surface-2); }
+.path-card.all { background: var(--tonal-green); grid-column: 1 / -1; }
+a.path-card.all:hover { background: var(--tonal-green-2); }
+.path-card.all .ic { background: var(--card); }
+.path-card .grow { min-width: 0; display: grid; gap: 3px; }
+.path-meta { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12px; font-weight: 600; color: var(--muted); }
+.path-meta span { display: inline-flex; align-items: center; gap: 4px; }
+
+.back-link { display: inline-flex; align-items: center; gap: 6px; margin-bottom: 12px; font-weight: 700; font-size: 14px; }
+.path-hero { border-radius: 28px; padding: 18px 20px; display: grid; gap: 12px; background: var(--tonal-green); color: var(--green-950); }
+.path-hero.fish { background: var(--tonal-blue); color: #0f3a63; }
+.path-hero.fruits { background: var(--tonal-orange); color: #4d3000; }
+.path-hero.livestock { background: var(--tonal-red); color: #5a1a12; }
+.path-hero .ic { background: rgba(255, 255, 255, .7); }
+.path-hero h1 { font-size: 22px; text-wrap: balance; }
+.path-hero p { margin-top: 4px; font-size: 14px; opacity: .85; }
+.path-facts { display: grid; gap: 8px; margin: 0; }
+@media (min-width: 560px) { .path-facts { grid-template-columns: 1fr 1fr; } }
+.path-facts > div { background: rgba(255, 255, 255, .6); border-radius: 16px; padding: 10px 12px; }
+.path-facts dt { display: flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 700; opacity: .8; }
+.path-facts dd { margin: 3px 0 0; font-size: 14px; font-weight: 600; }
+
+.check-list, .plain-list { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; }
+.check-list li { display: flex; gap: 8px; align-items: flex-start; }
+.check-list svg { color: var(--green-700); flex-shrink: 0; margin-top: 1px; }
+.plain-list li { position: relative; padding-left: 16px; }
+.plain-list li::before { content: ""; position: absolute; left: 2px; top: .6em; width: 6px; height: 6px; border-radius: 50%; background: currentColor; opacity: .5; }
+
+.path-steps { margin: 0; padding: 0; list-style: none; display: grid; gap: 0; }
+.path-steps > li { display: flex; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--border); }
+.path-steps > li:first-child { padding-top: 0; }
+.path-steps > li:last-child { border-bottom: 0; padding-bottom: 0; }
+.path-steps .n { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; flex-shrink: 0; background: var(--tonal-green); color: var(--green-900); font-weight: 800; font-size: 14px; font-variant-numeric: tabular-nums; }
+.path-steps h3 { margin: 4px 0 4px; }
+.path-steps p { margin: 0; line-height: 1.55; }
+.path-tip { display: flex; gap: 6px; align-items: flex-start; margin-top: 8px !important; padding: 8px 12px; border-radius: 14px; background: var(--tonal-yellow); color: #5c3d00; font-size: 13px; font-weight: 500; }
+.path-tip svg { flex-shrink: 0; margin-top: 2px; }
+
+.res-list { display: grid; gap: 8px; }
+.res-link { display: flex; align-items: flex-start; gap: 12px; padding: 12px; border-radius: 18px; background: var(--bg); color: inherit; text-decoration: none; }
+a.res-link:hover { text-decoration: none; background: var(--surface-2); }
+.res-link .grow { min-width: 0; display: grid; gap: 3px; }
+.res-link > .ext { flex-shrink: 0; margin-top: 3px; }
+.res-ic { width: 38px; height: 38px; border-radius: 12px; display: grid; place-items: center; flex-shrink: 0; background: var(--tonal-green); color: var(--green-900); }
+.res-ic.video { background: var(--tonal-red); color: #a1271d; }
+.res-src { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.res-note { color: var(--text); opacity: .8; }

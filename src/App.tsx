@@ -18,7 +18,7 @@ import { Manage } from '@/pages/Manage';
 import { Market } from '@/pages/Market';
 import { Permits } from '@/pages/Permits';
 import { Community } from '@/pages/Community';
-import { Learn } from '@/pages/Learn';
+import { Learn, LearnPath } from '@/pages/Learn';
 import { Settings } from '@/pages/Settings';
 import { ResetPassword } from '@/pages/ResetPassword';
 import { ConfirmHost, Empty, LinkButton, ToastHost, toast } from '@/components/ui';
@@ -43,6 +43,7 @@ const routes: RouteDef[] = [
   { pattern: '/permits', render: () => <Permits /> },
   { pattern: '/community', render: () => <Community /> },
   { pattern: '/learn', render: () => <Learn /> },
+  { pattern: '/learn/:id', render: (m) => <LearnPath id={m.params.id} /> },
   { pattern: '/settings', render: () => <Settings /> },
 ];
 
