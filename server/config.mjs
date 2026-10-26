@@ -86,6 +86,12 @@ export function loadConfig(env) {
       ai: { account: envCount(env, 'AI_DAILY_ACCOUNT', 20), total: envCount(env, 'AI_DAILY_TOTAL', 300) },
       pictures: { account: envCount(env, 'PICTURES_DAILY_ACCOUNT', 9), total: envCount(env, 'PICTURES_DAILY_TOTAL', 60) },
     },
+    prices: {
+      // DA Bantay Presyo's daily Metro Manila list, read by the server (server/prices.mjs). PRICES_FETCH=off stops the downloads.
+      fetch: !/^(off|0|false|no)$/i.test(text(env.PRICES_FETCH)),
+      baseUrl: base(env.DA_BASE_URL, 'https://www.da.gov.ph'),
+      everyMs: positive(env.PRICES_EVERY_MIN, 180) * 60_000,
+    },
     mailEnv: env, // server/mail.mjs reads SMTP_USER, SMTP_PASSWORD, SMTP_HOST, SMTP_PORT and EMAIL_FROM itself
   };
   return { config, problems };

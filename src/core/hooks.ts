@@ -3,6 +3,8 @@ import type { GeoPlace } from '@/types';
 import { fetchWeather, type WeatherData } from '@/services/weather';
 import { fetchQuakes, type Quake } from '@/services/hazards';
 import { loadMarket } from '@/services/market';
+import { loadNcrList } from '@/services/priceWatch';
+import type { NcrList } from '@/data/priceWatch';
 import type { MarketSnapshot } from '@/types';
 
 interface Async<T> { data: T | null; error: string | null; loading: boolean; reload: () => void }
@@ -62,6 +64,11 @@ export function useQuakes(place: GeoPlace | null | undefined): Async<Quake[]> {
 
 export function useMarket(feedUrl: string): Async<{ snapshot: MarketSnapshot; error?: string }> {
   return useCached(`mk:${feedUrl}`, (signal) => loadMarket({ marketFeedUrl: feedUrl }, signal));
+}
+
+/** DA Bantay Presyo's newest Metro Manila list (the server's daily copy, else the one bundled with the app). */
+export function useNcrList(): Async<NcrList> {
+  return useCached('ncr-prices', () => loadNcrList());
 }
 
 /** Small debounce for search inputs. */

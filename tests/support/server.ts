@@ -51,7 +51,7 @@ export async function startServer(env: Record<string, string>, dataDir?: string)
     cwd: ROOT,
     env: {
       ...process.env, PORT: String(port), DATA_FILE: join(dir, 'data.json'), ANTHROPIC_API_KEY: OFF, GEMINI_API_KEY: OFF, OPENAI_API_KEY: OFF,
-      MONGODB_URI: OFF, SMTP_USER: OFF, SMTP_PASSWORD: OFF, AUTH_RATE_PER_MIN: '1000', RESET_RATE_PER_MIN: '1000', ...NO_DAILY_LIMITS, ...env,
+      MONGODB_URI: OFF, SMTP_USER: OFF, SMTP_PASSWORD: OFF, PRICES_FETCH: 'off', AUTH_RATE_PER_MIN: '1000', RESET_RATE_PER_MIN: '1000', ...NO_DAILY_LIMITS, ...env,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });

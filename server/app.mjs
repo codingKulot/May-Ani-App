@@ -3,6 +3,7 @@
 //   server/auth.mjs    accounts           server/reset.mjs  "forgot your password?"            server/mail.mjs email
 //   server/sync.mjs    farm data sync     server/ai.mjs     Claude                              server/images.mjs pictures
 //   server/chat.mjs    chat               server/static.mjs the built app                       server/limits.mjs counters
+//   server/prices.mjs  DA Bantay Presyo's daily Metro Manila prices
 // Everything that must be the same for every copy of the server is in MongoDB, so several copies can run side by side behind
 // a load balancer (see docs/ARCHITECTURE.md). Each copy keeps only its own live chat connections and per-minute limits.
 
@@ -15,6 +16,7 @@ import { httpKit, logRequest, makeLog, requestId, securityHeaders } from './http
 import { imageProvider, imageRoutes } from './images.mjs';
 import { dailyQuota, describeTrust, memoryCounters, mongoCounters } from './limits.mjs';
 import { mailProblem, openMailer } from './mail.mjs';
+import { priceLists, priceRoutes } from './prices.mjs';
 import { resetRoutes } from './reset.mjs';
 import { staticFiles } from './static.mjs';
 import { syncRoutes } from './sync.mjs';
@@ -99,6 +101,9 @@ export async function createApp(config, { log = makeLog({ format: config.logForm
       routes[r] = (_req, res) => json(res, 503, { error: ACCOUNTS_OFF, code: 'accounts_off' });
     }
   }
+  // DA Bantay Presyo's daily Metro Manila prices (public data, no login); downloads start in announce()
+  const prices = priceLists({ database, log, base: config.prices.baseUrl, everyMs: config.prices.everyMs });
+  Object.assign(routes, priceRoutes(prices, kit));
   const serveStatic = staticFiles({ distDir: config.distDir, json });
   const headers = securityHeaders(config.appUrl);
 
@@ -197,6 +202,10 @@ export async function createApp(config, { log = makeLog({ format: config.logForm
       () => { log.info('Accounts: connected to MongoDB.'); return chat?.importFile(config.dataFile); },
       (e) => log.error(`Accounts: cannot use MongoDB yet. ${dbProblem(e) || ''} (${e.message}) Sign-up and log-in will keep retrying.`),
     );
+    if (config.prices.fetch) {
+      log.info(`Prices: looking for DA Bantay Presyo's latest Metro Manila list now and every ${Math.round(config.prices.everyMs / 60_000)} minutes.`);
+      prices.start();
+    } else log.info('Prices: DA Bantay Presyo downloads are OFF (PRICES_FETCH=off).');
     mailer?.verify().then(
       () => log.info(`Email: logged in to ${mailer.host}. Password reset emails can be sent.`),
       (e) => log.error(`Email: cannot send yet. ${mailProblem(e, mailer.port)}`),
@@ -214,6 +223,7 @@ export async function createApp(config, { log = makeLog({ format: config.logForm
       const closed = new Promise((ok) => server.close(() => ok()));
       server.closeIdleConnections?.();
       chat?.closeStreams();
+      prices.stop();
       const until = Date.now() + config.shutdownMs;
       while (inFlight.size > 0 && Date.now() < until) await new Promise((ok) => setTimeout(ok, 50));
       server.closeAllConnections?.();

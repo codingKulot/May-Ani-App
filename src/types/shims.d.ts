@@ -81,11 +81,13 @@ declare module 'bun:test' {
   export function beforeEach(fn: () => void): void;
   export function afterEach(fn: () => void): void;
   export function afterAll(fn: () => void | Promise<void>): void;
+  export function beforeAll(fn: () => void | Promise<void>): void;
 }
 
 
 declare module 'node:fs' {
   export function readFileSync(path: string | URL, encoding: 'utf8'): string;
+  export function readFileSync(path: string | URL): Uint8Array;
   export function writeFileSync(path: string, data: string | Uint8Array): void;
   export function copyFileSync(from: string, to: string): void;
   export function mkdirSync(path: string, opts?: { recursive?: boolean }): void;

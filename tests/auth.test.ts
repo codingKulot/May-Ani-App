@@ -26,7 +26,7 @@ async function startServer(env: Record<string, string>): Promise<Srv> {
   let log = '';
   const proc = spawn(process.execPath, ['server/index.mjs'], {
     cwd: ROOT,
-    env: { ...process.env, PORT: String(port), DATA_FILE: join(dir, 'data.json'), ANTHROPIC_API_KEY: OFF, GEMINI_API_KEY: OFF, OPENAI_API_KEY: OFF, SMTP_USER: OFF, SMTP_PASSWORD: OFF, AUTH_RATE_PER_MIN: '1000', ...env },
+    env: { ...process.env, PORT: String(port), DATA_FILE: join(dir, 'data.json'), ANTHROPIC_API_KEY: OFF, GEMINI_API_KEY: OFF, OPENAI_API_KEY: OFF, SMTP_USER: OFF, SMTP_PASSWORD: OFF, PRICES_FETCH: 'off', AUTH_RATE_PER_MIN: '1000', ...env },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   proc.stdout.on('data', (d) => (log += d));

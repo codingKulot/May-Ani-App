@@ -13,7 +13,7 @@ Owner: Ronilo (not a professional developer; explain choices plainly, he is lear
 Bun, React 19, TypeScript strict, own CSS (`src/styles.css`, no Tailwind), custom hash router (`src/core/router.tsx`), custom store (`src/core/store.ts`, `useSyncExternalStore`, localStorage key `may-ani.state.v1`). No `@types/react`: minimal shims are in `src/types/shims.d.ts`.
 - `bun run dev` : app on http://localhost:3000 (finds the server on 8787 automatically)
 - `bun run server` : API + chat server on 8787. `bun run start` builds, then serves everything on http://localhost:8787
-- `bun run typecheck`, `bun test` (524 tests on 20 October 2026, about 1 to 3 minutes with the MongoDB end-to-end tests), `bun run build` (output `dist/`; production build: `define` sets `process.env.NODE_ENV` so React's production build and the offline service worker are in it, about 560 KB JS; also writes `.br`/`.gz` copies: 613 KB of app files go out as 166 KB on 20 October 2026)
+- `bun run typecheck`, `bun test` (557 tests on 21 October 2026, about 1 to 3 minutes with the MongoDB end-to-end tests), `bun run build` (output `dist/`; production build: `define` sets `process.env.NODE_ENV` so React's production build and the offline service worker are in it, about 560 KB JS; also writes `.br`/`.gz` copies: 613 KB of app files go out as 166 KB on 20 October 2026)
 - `bun scripts/backup.ts [--all]` : copy of the MongoDB in `.env` into `backups/` (keeps 14); `bun scripts/restore.ts <folder|latest> <database> [--force]` (known open item 15). Never run them against the owner's Atlas in a check: set `MONGODB_URI` to a throwaway database.
 - Kill processes by port or PID, never `pkill -f` with a pattern that matches its own shell.
 - Version control: git repository since 18 October 2026 (branch `main`, first commit "Baseline"). No GitHub copy yet (`gh` is not installed). `.gitignore` keeps `.env`, `server/data.json*`, `node_modules`, `dist`, `backups/` out. Commit only when the owner asks.
@@ -184,6 +184,43 @@ Owner's request: a **Fruits** button next to Vegetables & crops, Fish and Livest
 - Not done: phones still running an older copy of the app skip fruit plans/farms/items from the account (no crash) until they update.
   Fruit numbers are estimates, not sourced.
 
+## Market: prices at the nearest DA-checked market (built 21 October 2026, branch `feature/market-price-watch`)
+Owner's ask: location-based "from-to" prices from the big public markets (e.g. Bankerohan, Agdao). Research (21 October 2026): no
+public source has live per-market prices. DA Davao Region (RFO XI, https://davao.da.gov.ph/) posts "Price Watch" pictures with Low,
+High, Prevailing and Average per market for Bankerohan (Davao City), Digos, Tagum, Mati, Malita and Nabunturan; the newest on its
+website was May 25, 2026 (newer ones are probably on its Facebook page only). Agdao is not checked by DA. BFAR XI fish reports and
+PSA OpenSTAT is monthly and months behind. Owner chose "nearest DA market" (option 1), then asked for the top 3 markets for any
+location (Settings > My location), DA Bantay Presyo when none is near, all four categories.
+DA Bantay Presyo (NCR) IS current: a daily PDF (weekdays) at `https://www.da.gov.ph/wp-content/uploads/<yyyy>/<mm>/Price-Monitoring-<Month>-<d>-<yyyy>.pdf`
+(found 20 October 2026; the site is very slow, curl needs `-C -` resumes). Pages 1-3: one prevailing price per market for 34 NCR
+markets x about 28 items; pages 4-6: Metro Manila Low/High/Prevailing/Average for rice, corn, mung bean, meat, eggs, fish, vegetables,
+fruits, spices, sugar, oil. Owner OK'd the `unpdf` package (21 October 2026) so the server reads it daily:
+- `server/prices.mjs` (types `prices.d.mts`): `parseBantayPresyo` (text positions from unpdf: per-market grid by column centres,
+  area pages by "label with 3-4 numbers to its right", rice kinds from the COMMERCIAL RICE headings, footnote letters dropped,
+  `itemGroup` sorts items into the app's groups), `priceLists` (checks today back to 7 days, newest first; stops at the day it has;
+  "page not found" HTML is not a list; downloads resume with Range requests, 8 tries of 2 min, because DA's site stalls; every
+  3 h, 15 min after a failed download; kept in MongoDB `price_lists` + memory), `GET /api/prices/ncr` (public, 503 `prices_none`
+  before the first list). Started in `announce()` only; `PRICES_FETCH=off` stops it (tests/support/server.ts and auth.test set it),
+  `DA_BASE_URL`, `PRICES_EVERY_MIN` (180). First real run 21 October 2026: the list of 20 October read from da.gov.ph, 34 markets.
+- Bundled copy for phones that cannot reach the server: `src/data/ncrPrices.json`, made with `bun scripts/bundle-prices.ts <pdf>
+  [url]` (adds about 40 KB to the app). `tests/prices.test.ts` checks the parser against the real PDF in `tests/fixtures/` (values
+  checked by eye) and that the bundled copy equals it. The app uses the server's list when its `asOf` is newer (`loadNcrList`).
+- `NCR_MARKET_PLACES` in `data/priceWatch.ts`: approximate positions of the 34 markets (keyed by `marketKey`); a market DA adds
+  later is skipped until it is added there. `ncrWatch` turns a list into markets `ncr-<key>` (one price per item) + `ncr` (area,
+  `area: true`, "All Metro Manila", every category).
+- `src/data/priceWatch.ts`: markets (approximate town-centre positions) and bulletins, copied by hand from the DA pictures
+  (`[label as DA wrote it, low, high, prevailing]`; "-" rows left out; Average not copied). Add a new bulletin per market with its
+  own `asOf`; the newest one wins. `tests/price-watch.test.ts` checks every row reads low <= prevailing <= high (catches most typos).
+- `src/services/priceWatch.ts`: `nearbyMarkets` (within `NEARBY_KM` 150, nearest first; none = "No DA-checked market near you yet",
+  never far-away prices), `itemRange` (catalog item -> DA row, only true matches: lettuce is left out because DA checks iceberg),
+  `ageLabel`/`FRESH_DAYS` 14 (older shows "Old prices: about N months old"), `rowUnit` (eggs per piece, oil unit not printed).
+- `topMarkets` = the 3 nearest real markets within 150 km (`nearbyArea` adds "All Metro Manila" as a 4th choice in reach; `watchData` merges DA Davao + Metro Manila); `groupCategory` puts DA groups into the app's four types (+ "Sugar & oil").
+- UI: `components/PriceWatchCard.tsx` at the top of Market (up to 3 market pills, category pills, Low to High with "most often";
+  none near = blue "No DA-checked market near <place>" + the Bantay Presyo Metro Manila list), "DA: ₱x–₱y" under the estimate in the
+  table (from the chosen market, else the Metro Manila list), and "Use ₱x" in Set my price. Verified 21 October 2026 in the browser
+  (throwaway DB) for Davao City, Quezon City (Munoz, North Diversion, Balintawak + All Metro Manila) and Cebu City. Not done:
+  markets outside Davao Region and Metro Manila (no current DA source found online); DA Davao stays hand-copied (pictures).
+
 ## Layout tab: "3 ideas for your site"
 Flow: user adds a site photo (planner photo is reused) -> one button "Analyze my photo and make 3 pictures" -> Claude reads the photo (`/api/ai/survey`: ground, reusable items, notes; optional, failure never blocks) -> an image model draws 3 designs on the photo (`/api/ai/render`) -> user taps an idea to see materials with current PH prices, recycling options and measured build steps.
 - Deterministic engine, no AI for numbers: `src/services/build/designs.ts` (3 designs: raised beds, grow bags/containers, vertical; cut list with lumber optimisation, 8 ft stock, 3 mm kerf, board feet; media mix; BOM; steps; `priceDesign`), `prompt.ts` (builds the image prompt from the design's real numbers), `geometry.ts` (homography helpers, leftover from the removed overlay; `isValidQuad` still used by `ai.ts`).
@@ -199,7 +236,7 @@ Flow: user adds a site photo (planner photo is reused) -> one button "Analyze my
 - `MONGODB_URI` : accounts (sign up / log in). Atlas `mongodb+srv://...` or local `mongodb://127.0.0.1:27017`. Contains a password: never print it. `MONGODB_DB` (default `may_ani`), `MONGODB_TIMEOUT_MS` (8000), `AUTH_RATE_PER_MIN` (20), `SYNC_RATE_PER_MIN` (120 data saves per minute per IP). Setup steps for the owner are in README "Turning on accounts".
 - `SMTP_USER`, `SMTP_PASSWORD` : password reset emails, sent from a Gmail account (owner chose Gmail on 18 October 2026: free, no domain needed, about 500 emails/day). `SMTP_PASSWORD` is a Gmail **app password**: a secret, never print it. `APP_URL` (default `http://localhost:PORT`) is where the emailed link opens the app; phones need the PC's LAN address or a real website. Optional: `EMAIL_FROM`, `RESET_RATE_PER_MIN` (5), `SMTP_HOST` (smtp.gmail.com), `SMTP_PORT` (465; tests point these at the fake mail server). Setup steps for the owner are in README "Turning on password reset".
 - Daily AI allowance (README "Putting May-Ani online safely", logged-in accounts only): `AI_DAILY_ACCOUNT` (20), `AI_DAILY_TOTAL` (300), `PICTURES_DAILY_ACCOUNT` (9), `PICTURES_DAILY_TOTAL` (60); 0 = none. `TRUST_PROXY` (empty = off). `ALLOWED_ORIGIN` should be the real website once online (startup prints a tip when `APP_URL` is https and it is still `*`).
-- Others: `ANTHROPIC_MODEL`, `AI_TIMEOUT_MS` (90000), `AI_RATE_PER_MIN` (15 AI calls per minute per IP), `PORT`, `ALLOWED_ORIGIN`, `DATA_FILE` (the old chat file, imported once into MongoDB), `LOG_FORMAT` (text | json), `INSTANCE_ID` (names a server copy in the logs), `*_BASE_URL` (used for mock servers in tests). All read only in `server/config.mjs`.
+- Others: `ANTHROPIC_MODEL`, `AI_TIMEOUT_MS` (90000), `AI_RATE_PER_MIN` (15 AI calls per minute per IP), `PORT`, `ALLOWED_ORIGIN`, `DATA_FILE` (the old chat file, imported once into MongoDB), `LOG_FORMAT` (text | json), `INSTANCE_ID` (names a server copy in the logs), `*_BASE_URL` (used for mock servers in tests), `PRICES_FETCH` (off = no DA downloads), `DA_BASE_URL`, `PRICES_EVERY_MIN` (180). All read only in `server/config.mjs`.
 - Server startup line shows `AI: on`, `pictures: gemini|openai|OFF`, `accounts: on (MongoDB)|OFF - reason` and `email: on (smtp.gmail.com), reset links open <APP_URL>|OFF - reason`, then `Accounts: connected to MongoDB.` and `Email: logged in to smtp.gmail.com...`, or why not.
 
 ## Known open items
