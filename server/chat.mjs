@@ -7,6 +7,7 @@
 //   chat_profiles { _id: chat id, name, role, blurb, createdAt, updatedAt }   people who opened Community
 //   chat_messages { _id: message id, from, to, text, at }                     `at` is the database's clock: one clock for all
 //   chat_tickets  { _id: SHA-256 of the ticket, chatId, expiresAt }           one-time tickets for the live stream
+//   chat_reads    { _id: "<me>|<with>", me, with, at }                         read up to here, per account (not per phone)
 //
 // Live messages (server-sent events): the browser's EventSource cannot send the login header, so the stream opens with a
 // ticket from POST /api/chat/ticket: random, for one connection only, valid for one minute. The login token never goes into a
@@ -48,11 +49,13 @@ export function chatService({ database, kit: { json, readJson, limited, cors }, 
   const profiles = database.collection('chat_profiles');
   const messages = database.collection('chat_messages');
   const tickets = database.collection('chat_tickets');
+  const reads = database.collection('chat_reads');
   database.index('chat_messages', { from: 1, at: -1 }, { name: 'by_sender' });
   database.index('chat_messages', { to: 1, at: -1 }, { name: 'by_receiver' });
   database.index('chat_messages', { at: 1 }, { name: 'by_time' });
   database.index('chat_profiles', { updatedAt: -1 }, { name: 'recent' });
   database.index('chat_tickets', { expiresAt: 1 }, { expireAfterSeconds: 0, name: 'expire' });
+  database.index('chat_reads', { me: 1 }, { name: 'by_reader' });
 
   // ---------------------------------------------------------------- live streams on this copy of the server
   const streams = new Map(); // chat id -> Set<res>
@@ -69,6 +72,11 @@ export function chatService({ database, kit: { json, readJson, limited, cors }, 
   function deliver(msg) {
     delivered.set(msg.id, Date.now());
     for (const r of streams.get(msg.to) ?? []) r.write(`event: message\ndata: ${JSON.stringify(msg)}\n\n`);
+  }
+
+  /** Tells the reader's other phones and tabs on this copy at once; copies elsewhere learn it with the next history load. */
+  function deliverRead(me, mark) {
+    for (const r of streams.get(me) ?? []) r.write(`event: read\ndata: ${JSON.stringify(mark)}\n\n`);
   }
 
   // ---------------------------------------------------------------- messages sent through other copies
@@ -140,7 +148,29 @@ export function chatService({ database, kit: { json, readJson, limited, cors }, 
     const me = chatIdOf(account);
     const found = await messages.find({ $or: [{ from: me }, { to: me }] }).sort({ at: -1 }).limit(HISTORY).toArray();
     const list = found.reverse().filter((m) => isAccountChat(m.from) && isAccountChat(m.to) && m.from !== m.to).map(toWire);
-    json(res, 200, { messages: list });
+    const marks = await reads.find({ me }, { projection: { with: 1, at: 1 } }).toArray();
+    json(res, 200, { messages: list, reads: Object.fromEntries(marks.map((r) => [r.with, new Date(r.at).toISOString()])) });
+  }
+
+  /**
+   * "I have read my conversation with `with` up to `at`" (the time of its newest message). Kept per account, so a
+   * conversation read on one phone or tab is read on all of them. A mark only moves forward, and never past the server's clock.
+   */
+  async function read(req, res) {
+    if (limited(req, 'read', 120)) return json(res, 429, { error: 'Too many requests.' });
+    const account = await loggedIn(req, res);
+    if (!account) return;
+    const b = await readJson(req, CHAT_BODY);
+    const me = chatIdOf(account);
+    const other = str(b.with, 64);
+    const when = typeof b.at === 'string' ? new Date(b.at) : null;
+    if (!isAccountChat(other) || other === me || !when || Number.isNaN(when.getTime())) return json(res, 400, { error: 'Bad read mark' });
+    const id = `${me}|${other}`;
+    await reads.updateOne({ _id: id }, { $max: { at: new Date(Math.min(when.getTime(), Date.now())) }, $setOnInsert: { me, with: other } }, { upsert: true });
+    const saved = await reads.findOne({ _id: id }, { projection: { at: 1 } });
+    const mark = { with: other, at: new Date(saved.at).toISOString() };
+    deliverRead(me, mark);
+    json(res, 200, mark);
   }
 
   async function send(req, res) {
@@ -255,7 +285,7 @@ export function chatService({ database, kit: { json, readJson, limited, cors }, 
   return {
     routes: {
       'POST /api/chat/register': register, 'GET /api/chat/directory': directory, 'GET /api/chat/history': history,
-      'POST /api/chat/send': send, 'POST /api/chat/ticket': ticket, 'GET /api/chat/stream': stream,
+      'POST /api/chat/send': send, 'POST /api/chat/read': read, 'POST /api/chat/ticket': ticket, 'GET /api/chat/stream': stream,
     },
     importFile,
     closeStreams,

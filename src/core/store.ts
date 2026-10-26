@@ -2,7 +2,8 @@ import { useSyncExternalStore } from 'react';
 import type { AppState } from '@/types';
 import { setCustomItems } from '@/data/catalog';
 
-const KEY = 'may-ani.state.v1';
+/** Where the app state is saved (other tabs of May-Ani see a save through the browser's `storage` event). */
+export const KEY = 'may-ani.state.v1';
 /** A saved copy that could not be read is moved here, so the app never overwrites (and loses) it. */
 export const DAMAGED_KEY = 'may-ani.state.damaged';
 const VERSION = 1;

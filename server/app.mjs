@@ -95,7 +95,7 @@ export async function createApp(config, { log = makeLog({ format: config.logForm
   const chat = database ? chatService({ database, kit, loggedIn, log, pollMs: chatPollMs }) : null;
   if (chat) Object.assign(routes, chat.routes);
   else {
-    for (const r of ['POST /api/chat/register', 'GET /api/chat/directory', 'GET /api/chat/history', 'POST /api/chat/send', 'POST /api/chat/ticket', 'GET /api/chat/stream']) {
+    for (const r of ['POST /api/chat/register', 'GET /api/chat/directory', 'GET /api/chat/history', 'POST /api/chat/send', 'POST /api/chat/read', 'POST /api/chat/ticket', 'GET /api/chat/stream']) {
       routes[r] = (_req, res) => json(res, 503, { error: ACCOUNTS_OFF, code: 'accounts_off' });
     }
   }

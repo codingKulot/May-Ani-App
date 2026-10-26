@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react';
-import { getState, setState, uid } from '@/core/store';
+import { getState, KEY as STATE_KEY, setState, uid } from '@/core/store';
 import type { AppState, ChatContact, ChatMessage } from '@/types';
 import { ApiError, chatApi, serverStatus, type DirectoryUser, type ServerMessage } from './ai';
 
@@ -26,7 +26,7 @@ export const toLocal = (m: ServerMessage, me: string): ChatMessage =>
 
 // ------------------------------------------------------------------ unread
 /**
- * Unread messages per conversation: messages from them that are newer than the newest one read on this phone.
+ * Unread messages per conversation: messages from them that are newer than the newest one read (on any phone of this account).
  * Only people in the contact list count, so a message from someone no longer in the chat never shows a count nobody can clear.
  */
 export function unreadCounts(s: Pick<AppState, 'chats' | 'chatRead' | 'contacts'>): Map<string, number> {
@@ -44,14 +44,62 @@ export function totalUnread(s: Pick<AppState, 'chats' | 'chatRead' | 'contacts'>
   return n;
 }
 
-/** Marks a conversation read up to its newest message. */
+/**
+ * Marks a conversation read up to its newest message, on this phone and (when connected) for the account, so the badge also
+ * clears on the user's other phones, tabs and site addresses.
+ */
 export function markRead(contactId: string) {
+  let moved = '';
   setState((s) => {
     const was = s.chatRead[contactId] ?? '';
     let newest = was;
     for (const m of s.chats) if (m.contactId === contactId && m.at > newest) newest = m.at;
-    return newest === was ? s : { ...s, chatRead: { ...s.chatRead, [contactId]: newest } };
+    if (newest === was) return s;
+    moved = newest;
+    return { ...s, chatRead: { ...s.chatRead, [contactId]: newest } };
   });
+  if (moved) sendRead(contactId, moved);
+}
+
+/** Takes read marks from the account (the server) or another tab: only ever forward. */
+function takeReads(theirs: unknown) {
+  setState((s) => { const chatRead = mergeRead(s.chatRead, theirs); return chatRead === s.chatRead ? s : { ...s, chatRead }; });
+}
+
+/**
+ * Tells the server how far this conversation is read. A mark made offline stays on this phone only (the read marks on a phone
+ * are not per account, so after a log-in as someone else they are never sent to the new account).
+ */
+function sendRead(contactId: string, at: string) {
+  if (status.mode !== 'online') return;
+  chatApi.read({ with: contactId, at }).then((mark) => takeReads({ [mark.with]: mark.at }), () => { /* the next read sends it again */ });
+}
+
+/**
+ * `mine` with every conversation that `theirs` read further (the same object when nothing is newer). Used for another tab or
+ * window of May-Ani on this phone: each keeps its own copy of the app state and saves all of it, so without this a conversation
+ * read in one tab stayed unread in the other, and the other tab's next save put the old read marks back (Roni's report of
+ * 26 October 2026: messages viewed, badge still 2).
+ */
+export function mergeRead(mine: Record<string, string>, theirs: unknown): Record<string, string> {
+  if (!theirs || typeof theirs !== 'object' || Array.isArray(theirs)) return mine;
+  let out = mine;
+  for (const [id, at] of Object.entries(theirs as Record<string, unknown>)) {
+    if (typeof at === 'string' && at > (out[id] ?? '')) out = { ...out, [id]: at };
+  }
+  return out;
+}
+
+/** Takes the read marks another tab saved (see mergeRead). */
+export function readFromOtherTab(saved: string | null) {
+  if (!saved) return;
+  let other: { chatRead?: unknown };
+  try { other = JSON.parse(saved); } catch { return; }
+  takeReads(other?.chatRead);
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('storage', (e) => { if (e.key === STATE_KEY) readFromOtherTab(e.newValue); });
 }
 
 /** The conversation open on screen (Community sets it): its new messages are read at once instead of announced. */
@@ -129,9 +177,9 @@ async function connect(k: string) {
   try {
     const profile = getState().profile!;
     const me = await chatApi.register({ blurb: `${profile.location.name}, ${profile.location.province}` });
-    const [{ users }, { messages }] = await Promise.all([chatApi.directory(), chatApi.history()]);
+    const [{ users }, { messages, reads }] = await Promise.all([chatApi.directory(), chatApi.history()]);
     if (whoKey() !== k) return; // logged out or in while connecting
-    setState((s) => ({ ...s, chatJoined: true, contacts: toContacts(users, me), chats: messages.map((m) => toLocal(m, me)) }));
+    setState((s) => ({ ...s, chatJoined: true, contacts: toContacts(users, me), chats: messages.map((m) => toLocal(m, me)), chatRead: mergeRead(s.chatRead, reads) }));
     setStatus({ mode: 'online', me });
     await openStream();
   } catch (e) {
@@ -152,6 +200,8 @@ async function openStream() {
   if (!me) return;
   const es = new EventSource(url);
   es.addEventListener('open', () => { retryMs = 3000; });
+  // This account read a conversation on another phone or tab.
+  es.addEventListener('read', (ev) => { try { const r = JSON.parse((ev as MessageEvent).data); takeReads({ [r.with]: r.at }); } catch { /* ignore */ } });
   es.addEventListener('message', async (ev) => {
     let m: ServerMessage;
     try { m = JSON.parse((ev as MessageEvent).data) as ServerMessage; } catch { return; /* ignore a malformed event */ }
@@ -191,11 +241,11 @@ async function refresh(announceNew: boolean) {
   const me = status.me;
   if (!me) return;
   try {
-    const [{ users }, { messages }] = await Promise.all([chatApi.directory(), chatApi.history()]);
+    const [{ users }, { messages, reads }] = await Promise.all([chatApi.directory(), chatApi.history()]);
     if (status.me !== me) return;
     const known = new Set(getState().chats.map((c) => c.id));
     const chats = messages.map((m) => toLocal(m, me));
-    setState((s) => ({ ...s, contacts: toContacts(users, me), chats }));
+    setState((s) => ({ ...s, contacts: toContacts(users, me), chats, chatRead: mergeRead(s.chatRead, reads) }));
     const fresh = chats.filter((m) => m.from === 'them' && !known.has(m.id));
     if (announceNew && fresh.length) announce(fresh[fresh.length - 1]);
   } catch { /* still offline: the next reconnect tries again */ }

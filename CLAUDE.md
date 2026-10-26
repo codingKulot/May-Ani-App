@@ -62,7 +62,12 @@ chat contacts, the separate chat token (`may-ani.chatToken` is deleted on connec
   Send is off. Tabs: Messages (people you talked with) and Contacts (everyone); no groups. Why accounts: the owner's test showed a
   guest who logged in kept chatting as the old guest id (both sides the same sender), and the owner removed guest mode against scams.
   The connection is app-wide (`startChat` in App.tsx) but only for phones that opened Community once (`chatJoined`), so nobody is listed
-  without choosing to chat. Unread = messages from them newer than `chatRead[contact]` (per phone, in app state, not synced); bold row
+  without choosing to chat. Unread = messages from them newer than `chatRead[contact]` (in app state; since 26 October 2026 also kept
+  per ACCOUNT on the server: `chat_reads` `{ _id: "<me>|<with>", me, with, at }`, `POST /api/chat/read` (`$max`, capped at the
+  server clock), `reads` in `/api/chat/history`, live `event: read` to the account's own streams on the same server copy; client
+  `markRead` -> `sendRead`, incoming marks through `mergeRead` (only forward); other tabs of one browser merge marks through the
+  `storage` event, because each tab saves its whole state and used to put old marks back. Owner's report: messages viewed, badge
+  still 2. A mark made offline stays on that phone. Tests: `tests/chat.test.ts`); bold row
   + count, total on the Community/Chat menu and in the tab title "(n) May-Ani"; an open, visible conversation is read at once. New
   message: toast when visible, otherwise a notification via `lib/notify.ts` (service worker `showNotification`, tap opens
   `#/community?with=<id>` through a postMessage to the app) after the user taps "Alert me of new messages" (https or localhost only).
@@ -225,7 +230,7 @@ Flow: user adds a site photo (planner photo is reused) -> one button "Analyze my
 11. Review of 18 October 2026: quick wins 1-5, 8, 12, 20, 22, 27, 28 are done; server hardening (daily AI allowance, TRUST_PROXY,
     security headers) done the same day. Still open from that list: hosting with HTTPS, privacy notice and account deletion
     (RA 10173), email verification, change password / log out everywhere, chat: no block/report (important for a marketplace,
-    now that everyone is a named account), no read receipts (ticks), read state is per phone, no notifications while the app is fully closed (needs Web Push);
+    now that everyone is a named account), no read receipts (ticks), no notifications while the app is fully closed (needs Web Push);
     Filipino interface, editing records and undo, units beyond kg, offline weather, reminders, browser tests,
     code splitting (on purpose, see docs/ARCHITECTURE.md decision 7). Chat in MongoDB, a CI file and MongoDB backups (item 15) were done 19 October 2026.
 13. Chat and login-only (18 October 2026) are verified by tests (login needed for every chat and AI call, sender is always the logged-in

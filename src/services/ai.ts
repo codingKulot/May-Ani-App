@@ -185,7 +185,11 @@ export const chatApi = {
   register: async (u: { blurb: string }) =>
     (await call<{ ok: true; id: string }>('/api/chat/register', { method: 'POST', body: JSON.stringify(u), headers: loginHeader() })).id,
   directory: () => call<{ users: DirectoryUser[] }>('/api/chat/directory', { headers: loginHeader() }),
-  history: () => call<{ messages: ServerMessage[] }>('/api/chat/history', { headers: loginHeader() }),
+  /** The last messages, and how far this account has read each conversation (`reads`: contact id -> time, on any phone). */
+  history: () => call<{ messages: ServerMessage[]; reads?: Record<string, string> }>('/api/chat/history', { headers: loginHeader() }),
+  /** Marks a conversation read up to `at` for this account on every phone; answers the account's mark (never older). */
+  read: (r: { with: string; at: string }) =>
+    call<{ with: string; at: string }>('/api/chat/read', { method: 'POST', body: JSON.stringify(r), headers: loginHeader() }),
   send: (m: { to: string; text: string }) =>
     call<{ id: string; at: string }>('/api/chat/send', { method: 'POST', body: JSON.stringify(m), headers: loginHeader() }),
   /**

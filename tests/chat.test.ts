@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { getState, resetState, setState } from '@/core/store';
-import { markRead, toLocal, totalUnread, unreadCounts } from '@/services/chat';
+import { markRead, mergeRead, readFromOtherTab, toLocal, totalUnread, unreadCounts } from '@/services/chat';
 import { chatListTime, dayLabel } from '@/lib/format';
 import type { ChatContact, ChatMessage } from '@/types';
 import { call, signUpUser, startMongo, startServer, type Srv } from './support/server';
@@ -48,6 +48,24 @@ describe('unread messages', () => {
     markRead('u1');
     expect(getState().chatRead).toEqual({ u1: '2026-10-18T01:00:00Z' });
     expect(totalUnread(getState())).toBe(1);
+  });
+
+  test('a conversation read in another tab of May-Ani is read here too, and never goes back to unread', () => {
+    const read = { u1: '2026-10-18T02:00:00Z', u2: '2026-10-18T05:00:00Z' };
+    expect(mergeRead(read, { u1: '2026-10-18T03:00:00Z', u2: '2026-10-18T04:00:00Z', u3: '2026-10-18T01:00:00Z' }))
+      .toEqual({ u1: '2026-10-18T03:00:00Z', u2: '2026-10-18T05:00:00Z', u3: '2026-10-18T01:00:00Z' });
+    expect(mergeRead(read, { u1: '2026-10-18T01:00:00Z' })).toBe(read); // nothing newer: same object, no re-render
+    for (const bad of [null, 'x', [], { u1: 5 }, { u1: null }]) expect(mergeRead(read, bad)).toBe(read);
+
+    // Roni's report: two messages viewed in one tab, while a second tab still counted them as unread.
+    setState((s) => ({ ...s, contacts, chats: [msg('a', 'u1', 'them', '2026-10-18T01:00:00Z'), msg('b', 'u1', 'them', '2026-10-18T02:00:00Z')] }));
+    expect(totalUnread(getState())).toBe(2);
+    readFromOtherTab(JSON.stringify({ chatRead: { u1: '2026-10-18T02:00:00Z' } }));
+    expect(totalUnread(getState())).toBe(0);
+    readFromOtherTab(JSON.stringify({ chatRead: { u1: '2026-10-18T01:00:00Z' } })); // an older save from a third tab
+    expect(getState().chatRead.u1).toBe('2026-10-18T02:00:00Z');
+    for (const bad of [null, '', '{not json', 'null', '[]']) readFromOtherTab(bad);
+    expect(totalUnread(getState())).toBe(0);
   });
 });
 
@@ -154,5 +172,39 @@ describe.skipIf(!mongo)('chat on the server (logged-in users only)', () => {
     expect((await fetch(url)).status).toBe(401); // the same ticket again
     expect((await fetch(`${srv!.url}/api/chat/stream?ticket=made-up`)).status).toBe(401);
     expect((await fetch(`${srv!.url}/api/chat/stream?userId=${rosaId}&token=${rosa.token}`)).status).toBe(401); // the old way
+  }, 30_000);
+
+  test('a conversation read on one phone is read on every phone of that account, and only that account', async () => {
+    const lito = await signUpUser(srv!, 'Lito');
+    const nena = await signUpUser(srv!, 'Nena');
+    const litoId = (await join_(lito.token)).body.id;
+    const nenaId = (await join_(nena.token)).body.id;
+    const first = (await chat('POST', '/api/chat/send', nena.token, { to: litoId, text: 'Una' })).body;
+    const second = (await chat('POST', '/api/chat/send', nena.token, { to: litoId, text: 'Ikaduha' })).body;
+    expect((await chat('GET', '/api/chat/history', lito.token)).body.reads).toEqual({});
+
+    expect((await chat('POST', '/api/chat/read', undefined, { with: nenaId, at: second.at })).status).toBe(401);
+    for (const bad of [{ with: nenaId }, { with: nenaId, at: 'yesterday' }, { with: 'phone-old-guest', at: second.at }, { with: litoId, at: second.at }]) {
+      expect((await chat('POST', '/api/chat/read', lito.token, bad)).status).toBe(400);
+    }
+
+    // Lito's other phone has its stream open: it hears about the read at once.
+    const { ticket } = (await chat('POST', '/api/chat/ticket', lito.token)).body;
+    const live = readStream(`${srv!.url}/api/chat/stream?ticket=${encodeURIComponent(ticket)}`, 'event: read');
+    await new Promise((r) => setTimeout(r, 300));
+    const marked = await chat('POST', '/api/chat/read', lito.token, { with: nenaId, at: second.at });
+    expect(marked.body).toEqual({ with: nenaId, at: second.at });
+    expect((await live).text).toContain(JSON.stringify({ with: nenaId, at: second.at }));
+
+    // An older mark (a phone that was behind) never moves it back; a time in the future is held at the server's clock.
+    expect((await chat('POST', '/api/chat/read', lito.token, { with: nenaId, at: first.at })).body.at).toBe(second.at);
+    const future = (await chat('POST', '/api/chat/read', lito.token, { with: nenaId, at: '2999-01-01T00:00:00.000Z' })).body.at;
+    expect(future > second.at && future < '2999').toBe(true);
+
+    // Loaded by a phone that never opened the conversation: both messages count as read there too.
+    const { messages, reads } = (await chat('GET', '/api/chat/history', lito.token)).body;
+    const s = { chats: messages.map((m: any) => toLocal(m, litoId)), chatRead: mergeRead({}, reads), contacts: [person(nenaId)] };
+    expect(totalUnread(s)).toBe(0);
+    expect((await chat('GET', '/api/chat/history', nena.token)).body.reads).toEqual({}); // Nena has read nothing
   }, 30_000);
 });
