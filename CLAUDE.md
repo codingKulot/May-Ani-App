@@ -305,8 +305,12 @@ Flow: user adds a site photo (planner photo is reused) -> one button "Analyze my
 14. Ready to scale (19 October 2026, docs/ARCHITECTURE.md): several server copies can share one MongoDB (chat, tickets, lockouts,
     reset limits and the daily AI allowance are shared; live delivery between copies by a 1.5 s database check). Verified by
     `tests/scale.test.ts` (two real server processes on one throwaway MongoDB) and a browser check with two copies. **Not verified:**
-    a real load balancer or hosting platform, the owner's Atlas (the chat import runs there at the next start), the `Dockerfile`
-    (no Docker on this PC) and `.github/workflows/ci.yml` (no GitHub copy yet). Windows cannot send SIGTERM to another process, so
+    a real load balancer or hosting platform, the owner's Atlas (the chat import runs there at the next start) and
+    `.github/workflows/ci.yml` (no GitHub copy yet). Docker (29 October 2026, Docker Desktop 4.97 on this PC): `Dockerfile`
+    (runtime keeps only mongodb/nodemailer/unpdf, no bun cache: 277 MB), `compose.yaml` (app with `.env`), `compose.local-db.yaml`
+    (adds `mongo:8.0`, keys off). Verified: builds, healthy, no `.env` in the image, runs as `bun`, Atlas connects with the real
+    `.env`, sign-up/Dashboard/Market in the browser on the throwaway DB. `docker run --env-file .env` keeps quotes (MONGODB_URI
+    breaks): use compose. The browser pane never fetched `sw.js` from the container (pane quirk, see Testing notes; `sw.js` serves 200). Windows cannot send SIGTERM to another process, so
     the clean stop is tested in-process (`createApp().shutdown()`); Ctrl+C in the owner's terminal uses the same code.
 12. Hardening limits (18 October 2026): daily counts are in MongoDB since 19 October 2026 (shared by all copies, survive restarts). TRUST_PROXY is
     tested with simulated headers only, never behind a real proxy or tunnel. The CSP was checked on the built app (16 pages, no

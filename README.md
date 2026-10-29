@@ -284,13 +284,37 @@ AI allowance) is in MongoDB; details and the reasons are in [docs/ARCHITECTURE.m
 - **Logs**: by default the terminal shows plain sentences, plus a line for server errors and slow requests. `LOG_FORMAT=json` writes
   one JSON line per request (time, request id, method, path without the part after `?`, status, milliseconds) for log tools.
   Every answer carries an `X-Request-Id`; when someone reports a problem, that id finds it in the log. `INSTANCE_ID` names a copy.
-- **Container**: a `Dockerfile` is included for hosting platforms. It has **not been tested yet** (no Docker on the development
-  PC): build and run it once (`docker build -t may-ani .`, then `docker run --env-file .env -p 8787:8787 may-ani`) before relying on it.
+- **Container**: a `Dockerfile` is included for hosting platforms, see "Running May-Ani with Docker" below.
 - **Automatic checks**: `.github/workflows/ci.yml` runs the type check, all tests and the build on GitHub for every change, once
   the project is on GitHub (not yet).
 - **Old chat file**: chat used to be saved in `server/data.json`. The first start with MongoDB copies the accounts and their
   messages from it into MongoDB and renames the file to `data.json.imported-<time>` (kept, never deleted; delete it yourself
   once chat looks right).
+
+## Running May-Ani with Docker
+
+Docker packs the server and the built app into one "image" that runs the same on your PC and on a hosting platform. You do not
+need it for everyday work (`bun run start` does the same), but it is how May-Ani will most likely be hosted.
+Checked on 29 October 2026 with Docker Desktop on the development PC: the image builds (about 280 MB), starts, reports healthy,
+connects to MongoDB Atlas with the real `.env`, and the app works in the browser (sign up, Dashboard, weather, Market prices).
+
+1. Install **Docker Desktop** for Windows (https://www.docker.com/products/docker-desktop/) and start it once (whale icon in the taskbar).
+2. Open a terminal in the project folder and start May-Ani:
+   - `docker compose up --build` : builds the image and starts it with your `.env`. Open http://localhost:8787. Ctrl+C stops it.
+   - `docker compose up --build -d` : the same, in the background. `docker compose logs -f app` shows the log, `docker compose down` stops it.
+   - Port 8787 must be free: stop `bun run server` / `bun run start` first.
+3. Try it without touching your Atlas database (its own MongoDB inside Docker, AI, pictures and email off, nothing costs money):
+   `docker compose -f compose.yaml -f compose.local-db.yaml up --build`. Add `down -v` instead of `up --build` to delete that test database.
+
+Good to know:
+- The `.env` file is **never** copied into the image (`.dockerignore`); compose hands its settings to the container when it starts.
+  On a hosting platform you type the same names into its "environment variables" page instead.
+- Use `docker compose`, not `docker run --env-file .env`: `docker run` keeps the quotes around `MONGODB_URI="..."`, and then
+  MongoDB refuses the address (checked).
+- Atlas still has to allow your internet address (Atlas > Network Access), the same as without Docker.
+- The image holds no farm data: accounts, farms and chat are in MongoDB, photos stay on the phones. Rebuilding or deleting the
+  container loses nothing.
+- Log lines are JSON in the container (`LOG_FORMAT=json`), for hosting log tools.
 
 ## Roadmap
 Filipino/Cebuano UI, hogs & ASF module, official PHIVOLCS GIS layers, syncing photos to the account, DA Bantay Presyo ETL,

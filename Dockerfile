@@ -1,8 +1,10 @@
-# May-Ani in a container, for hosting platforms (Fly.io, Railway, Render, a VPS with Docker, ...). Not needed on the owner's PC.
-# NOT YET TESTED: Docker is not installed on the PC where this was written (October 2026). Build and run it once before relying on it:
+# May-Ani in a container, for hosting platforms (Fly.io, Railway, Render, a VPS with Docker, ...) and for trying it on the PC.
+# Built and run with Docker Desktop on the owner's PC on 29 October 2026. Easiest way to run it: docker compose (see compose.yaml).
 #   docker build -t may-ani .
-#   docker run --env-file .env -p 8787:8787 may-ani
+#   docker compose up                (uses .env, the same as "bun run start")
 # Settings come from the platform's environment variables (the same names as .env.example); the .env file is never copied in.
+# Careful with "docker run --env-file .env": it keeps quotes, so MONGODB_URI="mongodb+srv://..." arrives with the quotes and
+# MongoDB refuses it. docker compose reads the quotes correctly.
 # Several copies can run side by side on the same MongoDB (see docs/ARCHITECTURE.md).
 
 # ---- build the app (needs the dev tools)
@@ -20,7 +22,9 @@ FROM oven/bun:1.4.3-slim
 WORKDIR /app
 ENV NODE_ENV=production PORT=8787 LOG_FORMAT=json
 COPY package.json bun.lock ./
-RUN bun install --frozen-lockfile --production
+# React and the icons are already inside dist/; the server only loads mongodb, nodemailer and unpdf (85 MB less)
+RUN bun install --frozen-lockfile --production \
+  && rm -rf node_modules/react node_modules/react-dom node_modules/react-icons node_modules/scheduler /root/.bun/install/cache
 COPY server ./server
 COPY --from=build /app/dist ./dist
 # not root: a break-in through the app cannot change the container

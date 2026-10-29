@@ -72,7 +72,8 @@ Today there is one copy of the server on the owner's PC. The design lets more co
 4. Deploys: the platform sends SIGTERM; each copy stops taking new connections, ends its live chat streams (phones reconnect to
    another copy within seconds), lets running requests finish (at most 10 s) and exits.
 5. Optional: `INSTANCE_ID` names a copy in the logs; `LOG_FORMAT=json` gives one JSON line per request for log tools.
-6. A `Dockerfile` is included (not yet tested: no Docker on the development PC).
+6. A `Dockerfile` is included (built and run with Docker Desktop on 29 October 2026, see README "Running May-Ani with Docker";
+   `compose.yaml` runs it with `.env`, `compose.local-db.yaml` adds a throwaway MongoDB).
 
 ## Decisions (and why)
 

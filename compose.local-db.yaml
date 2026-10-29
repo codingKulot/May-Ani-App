@@ -1,0 +1,28 @@
+# Adds a MongoDB of its own inside Docker, for trying May-Ani without touching your Atlas database:
+#   docker compose -f compose.yaml -f compose.local-db.yaml up --build
+# AI, pictures and email keys are switched off here, so nothing costs money. Accounts made here live only in this
+# test database ("docker compose -f compose.yaml -f compose.local-db.yaml down -v" deletes it).
+services:
+  app:
+    environment:
+      MONGODB_URI: mongodb://mongo:27017
+      MONGODB_DB: may_ani_docker_test
+      ANTHROPIC_API_KEY: " "
+      GEMINI_API_KEY: " "
+      OPENAI_API_KEY: " "
+      SMTP_USER: " "
+      SMTP_PASSWORD: " "
+    depends_on:
+      mongo:
+        condition: service_healthy
+  mongo:
+    image: mongo:8.0
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+volumes:
+  mongo-data:

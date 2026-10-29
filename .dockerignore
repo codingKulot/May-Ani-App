@@ -2,6 +2,7 @@
 .env
 .env.*
 !.env.example
+scripts/*.env
 server/data.json
 server/data.json.*
 node_modules
@@ -12,3 +13,8 @@ dist
 *.log
 # database backups (scripts/backup.ts): password hashes and personal data
 backups
+# not needed to build the app
+tests
+docs
+compose*.yaml
+Dockerfile

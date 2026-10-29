@@ -1,0 +1,23 @@
+# May-Ani with Docker on your PC: the same app as "bun run start", inside a container.
+#   docker compose up --build        start it (Ctrl+C stops it), then open http://localhost:8787
+#   docker compose up --build -d     start it in the background; "docker compose down" stops it
+#   docker compose logs -f app       see the server log
+# Settings and keys come from .env (never copied into the image). Your accounts stay in your MongoDB Atlas, as before:
+# Atlas must allow this PC's internet address (Atlas > Network Access), the same as without Docker.
+# Trying it without touching Atlas: docker compose -f compose.yaml -f compose.local-db.yaml up --build
+services:
+  app:
+    build: .
+    image: may-ani
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      PORT: "8787"
+      # the old chat file is not inside the container (it was imported into MongoDB already)
+      DATA_FILE: /tmp/data.json
+    ports:
+      - "8787:8787"
+    restart: unless-stopped
+    # the server gets 10 s to finish running requests after "docker compose down"
+    stop_grace_period: 15s
