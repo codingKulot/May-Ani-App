@@ -1,0 +1,36 @@
+# Render "Blueprint" for the May-Ani STAGING copy (the test website, not the real one).
+# On render.com: New > Blueprint > pick the May-Ani-App repository. Render reads this file, builds the Dockerfile from the
+# "staging" branch and asks you to type the values marked "sync: false" (secrets are never written in this file).
+# Free plan: the site sleeps after 15 minutes without visitors; the first visit after that takes about a minute.
+services:
+  - type: web
+    name: may-ani-staging
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    branch: staging
+    plan: free
+    region: singapore # closest Render region to the Philippines
+    healthCheckPath: /api/live
+    autoDeploy: true # every push to "staging" is deployed again
+    envVars:
+      # its own database name, so testing never touches the real "may_ani" data
+      - key: MONGODB_DB
+        value: may_ani_staging
+      # Render puts one proxy in front of the app; the visitor's address is read from it (rate limits, lockouts)
+      - key: TRUST_PROXY
+        value: "1"
+      - key: LOG_FORMAT
+        value: json
+      # typed by you on Render (copy from your .env); leave a box empty to keep that part switched off
+      - key: MONGODB_URI
+        sync: false
+      - key: APP_URL # the address Render shows for this service, for example https://may-ani-staging.onrender.com
+        sync: false
+      - key: ALLOWED_ORIGIN # the same address as APP_URL
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
